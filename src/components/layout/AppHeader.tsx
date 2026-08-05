@@ -238,6 +238,10 @@ export const AppHeader: React.FC = () => {
                     <Settings className="w-4 h-4 mr-2.5 text-app-muted" />
                     Mail Settings
                   </DropdownMenu.Item>
+
+                  <div className="px-1 py-1">
+                    <PWAInstallButton className="w-full justify-center" />
+                  </div>
                 </div>
 
                 <div className="border-t border-app-border p-2">

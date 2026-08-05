@@ -93,9 +93,6 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
         </main>
       </div>
 
-      {/* Mobile Floating Compose Button */}
-      <MobileComposeFAB />
-
       {/* Mobile Bottom Navigation Bar */}
       <MobileBottomNav />
 

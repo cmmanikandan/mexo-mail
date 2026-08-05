@@ -66,7 +66,7 @@ export const MobileBottomNav: React.FC = () => {
   ];
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-app-border z-40 flex items-center justify-around px-2 shadow-lg select-none">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-t border-app-border z-50 flex items-center justify-around px-2 shadow-lg select-none pb-[env(safe-area-inset-bottom,0px)]">
       {navItems.map((item) => {
         if (item.isCompose) {
           return (
