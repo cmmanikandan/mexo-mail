@@ -3,8 +3,15 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/logo.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MEXO Mail — Made to Connect.</title>
+    <link rel="apple-touch-icon" href="/logo.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="theme-color" content="#7C3AED" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MEXO Mail" />
+    <title>MEXO Mail — Simple, Fast & Secure Email</title>
     <meta name="description" content="MEXO Mail is a fast, organized, and secure digital communication platform." />
     <!-- Google Fonts Inter -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -14,5 +21,16 @@
   <body class="bg-[#F8FAFD] dark:bg-[#0B0F17] text-slate-900 dark:text-slate-100 antialiased selection:bg-mexo-100 selection:text-mexo-900">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Register Service Worker for PWA Support -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => console.log('PWA ServiceWorker registered with scope:', reg.scope))
+            .catch((err) => console.log('PWA ServiceWorker registration failed:', err));
+        });
+      }
+    </script>
   </body>
 </html>

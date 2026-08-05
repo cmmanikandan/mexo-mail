@@ -4,6 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
 import { useMailStore } from '../../store/mailStore';
 import { MexoAvatar } from '../common/MexoAvatar';
+import { PWAInstallButton } from '../common/PWAInstallButton';
 import { MobileMailDrawer } from './MobileMailDrawer';
 import { db } from '../../services/db';
 import {
@@ -188,6 +189,8 @@ export const AppHeader: React.FC = () => {
           >
             <Settings className="w-5 h-5" />
           </button>
+
+          <PWAInstallButton className="hidden sm:flex" />
 
           {/* Profile Circle Avatar */}
           <DropdownMenu.Root>

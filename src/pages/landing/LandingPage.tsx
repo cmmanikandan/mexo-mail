@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { MexoAvatar } from '../../components/common/MexoAvatar';
+import { PWAInstallButton } from '../../components/common/PWAInstallButton';
 import {
   ArrowRight,
   Shield,
@@ -39,6 +40,7 @@ export const LandingPage: React.FC = () => {
 
         {/* Action Buttons */}
         <div className="flex items-center space-x-3">
+          <PWAInstallButton className="hidden sm:flex" />
           {isAuthenticated ? (
             <div className="flex items-center space-x-3">
               <div className="hidden sm:flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-app-border">

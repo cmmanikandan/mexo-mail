@@ -1,16 +1,26 @@
 {
   "short_name": "MEXO Mail",
-  "name": "MEXO Mail — Made to Connect.",
+  "name": "MEXO Mail — Simple, Fast & Secure Email",
+  "description": "A fast, private and organized mailbox built to help you communicate, focus and get things done.",
   "icons": [
     {
       "src": "/logo.png",
       "type": "image/png",
-      "sizes": "192x192 512x512"
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
     }
   ],
-  "start_url": "/mail/inbox",
-  "background_color": "#0f172a",
-  "theme_color": "#0070d4",
+  "start_url": "/",
+  "scope": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#7C3AED",
   "display": "standalone",
-  "orientation": "portrait"
+  "orientation": "any",
+  "categories": ["productivity", "utilities"]
 }
