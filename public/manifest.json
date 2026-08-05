@@ -1,0 +1,16 @@
+{
+  "short_name": "MEXO Mail",
+  "name": "MEXO Mail — Made to Connect.",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "type": "image/png",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/mail/inbox",
+  "background_color": "#0f172a",
+  "theme_color": "#0070d4",
+  "display": "standalone",
+  "orientation": "portrait"
+}

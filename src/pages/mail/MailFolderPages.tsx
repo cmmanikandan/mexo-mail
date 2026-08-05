@@ -1,0 +1,152 @@
+import React from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { AppLayout } from '../../components/layout/AppLayout';
+import { MailList } from '../../components/mail/MailList';
+import { ThreadView } from '../../components/mail/ThreadView';
+import { SearchFilterChips } from '../../components/mail/SearchFilterChips';
+import { MobileSearchPage } from '../../components/mail/MobileSearchPage';
+import { useMailStore, MailFolder } from '../../store/mailStore';
+import { db } from '../../services/db';
+import { filterMessagesByQuery } from '../../utils/SearchQueryParser';
+import { Message, Thread } from '../../types/mail';
+
+export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ folderOverride }) => {
+  const { folder: paramFolder } = useParams<{ folder: string }>();
+  const [searchParams] = useSearchParams();
+  const urlQuery = searchParams.get('q') || '';
+
+  const { currentFolder, activeLabelId, searchQuery, lastUpdated } = useMailStore();
+
+  const activeFolder = folderOverride || (paramFolder as MailFolder) || currentFolder || 'inbox';
+  const effectiveQuery = urlQuery || searchQuery;
+
+  const isMobileSearchRoute = activeFolder === 'search' && typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // Reactively recompute filtered messages on any state change or action (lastUpdated)
+  const filteredMessages: Message[] = React.useMemo(() => {
+    const currentUser = db.getCurrentUser();
+    const messages = db.getMessagesForUser(currentUser.email);
+    const labels = db.getLabels();
+
+    if (activeFolder === 'drafts') {
+      const userDrafts = db.getDraftsForUser(currentUser.email);
+      return userDrafts.map((d) => ({
+        id: d.id,
+        threadId: `th-draft-${d.id}`,
+        senderName: currentUser.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : currentUser.email,
+        senderEmail: currentUser.email,
+        recipients: d.to.length > 0 ? d.to : ['(No recipients)'],
+        subject: d.subject || '(Draft)',
+        snippet: d.bodyHtml ? d.bodyHtml.replace(/<[^>]*>?/gm, '').slice(0, 100) : '(Empty draft)',
+        bodyHtml: d.bodyHtml,
+        attachments: d.attachments || [],
+        createdAt: d.lastSavedAt || new Date().toISOString(),
+        userState: {
+          recipientEmail: currentUser.email,
+          isRead: true,
+          isStarred: false,
+          isImportant: false,
+          isArchived: false,
+          isDeleted: false,
+          isSpam: false,
+          labels: [],
+        },
+      }));
+    }
+
+    if (activeFolder === 'search' || effectiveQuery.trim()) {
+      return filterMessagesByQuery(messages, effectiveQuery, labels);
+    }
+
+    if (activeLabelId) {
+      return messages.filter((msg) => msg.userState.labels && msg.userState.labels.includes(activeLabelId));
+    }
+
+    const now = Date.now();
+    return messages.filter((msg) => {
+      const st = msg.userState;
+      // A message is "snoozed" only if the snooze time is still in the future
+      const isSnoozedActive = st.snoozedUntil ? new Date(st.snoozedUntil).getTime() > now : false;
+      switch (activeFolder) {
+        case 'inbox':
+          return !st.isArchived && !st.isDeleted && !st.isSpam && !isSnoozedActive;
+        case 'starred':
+          return st.isStarred && !st.isDeleted;
+        case 'snoozed':
+          return isSnoozedActive && !st.isDeleted;
+        case 'important':
+          return st.isImportant && !st.isDeleted;
+        case 'sent':
+          return msg.senderEmail.toLowerCase() === currentUser.email.toLowerCase() && !st.isDeleted;
+        case 'scheduled':
+          return false; // Scheduled messages are separate (ScheduledMessage type)
+        case 'archive':
+          return st.isArchived && !st.isDeleted && !st.isSpam;
+        case 'all':
+          return !st.isDeleted;
+        case 'spam':
+          return st.isSpam && !st.isDeleted;
+        case 'trash':
+          return st.isDeleted;
+        default:
+          return !st.isDeleted;
+      }
+    });
+  }, [activeFolder, activeLabelId, effectiveQuery, lastUpdated]);
+
+  const settings = db.getSettings();
+  const readingPanePos = settings.readingPanePosition || 'off';
+
+  if (isMobileSearchRoute) {
+    return <MobileSearchPage />;
+  }
+
+  return (
+    <AppLayout>
+      <div key={activeFolder} className="flex-1 flex flex-col min-h-0 animate-in fade-in slide-in-from-right-1 duration-200">
+        {(activeFolder === 'search' || Boolean(effectiveQuery.trim())) && <SearchFilterChips />}
+        <MailList messages={filteredMessages} />
+      </div>
+    </AppLayout>
+  );
+};
+
+export const ThreadDetailPage: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const { lastUpdated } = useMailStore();
+  const currentUser = db.getCurrentUser();
+  const messages = db.getMessagesForUser(currentUser.email);
+
+  const threadMessages = React.useMemo(() => {
+    return messages.filter((m) => m.threadId === id);
+  }, [id, messages, lastUpdated]);
+
+  if (threadMessages.length === 0) {
+    return (
+      <AppLayout>
+        <div className="p-8 text-center text-app-muted">Thread not found or deleted.</div>
+      </AppLayout>
+    );
+  }
+
+  const lastMsg = threadMessages[threadMessages.length - 1];
+  const thread: Thread = {
+    id: id || '',
+    subject: threadMessages[0]?.subject || '(No Subject)',
+    messageCount: threadMessages.length,
+    lastMessageAt: lastMsg?.createdAt || new Date().toISOString(),
+    participants: threadMessages.map((m) => ({ name: m.senderName, email: m.senderEmail, avatar: m.senderAvatar })),
+    snippet: lastMsg?.snippet || '',
+    messages: threadMessages,
+    isUnread: threadMessages.some((m) => !m.userState.isRead),
+    isStarred: threadMessages.some((m) => m.userState.isStarred),
+    isImportant: threadMessages.some((m) => m.userState.isImportant),
+    labels: Array.from(new Set(threadMessages.flatMap((m) => m.userState.labels || []))),
+  };
+
+  return (
+    <AppLayout>
+      <ThreadView thread={thread} />
+    </AppLayout>
+  );
+};
