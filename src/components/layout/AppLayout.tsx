@@ -25,18 +25,19 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   const { openCompose } = useComposeStore();
   const { currentFolder, setCurrentFolder, lastUpdated } = useMailStore();
   const { currentUser } = useAuthStore();
+  const userEmail = currentUser?.email || 'manikandanprabhu1221@mexo.com';
 
   // 🔔 Tab Favicon badge with unread count
   const unreadCount = React.useMemo(() => {
-    if (!currentUser.email) return 0;
-    const msgs = db.getMessagesForUser(currentUser.email);
+    if (!userEmail) return 0;
+    const msgs = db.getMessagesForUser(userEmail);
     const now = Date.now();
     return msgs.filter((m) => {
       const st = m.userState;
       const isSnoozed = st.snoozedUntil ? new Date(st.snoozedUntil).getTime() > now : false;
       return !st.isRead && !st.isArchived && !st.isDeleted && !st.isSpam && !isSnoozed;
     }).length;
-  }, [currentUser.email, lastUpdated]);
+  }, [userEmail, lastUpdated]);
 
   useFaviconBadge(unreadCount);
 

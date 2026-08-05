@@ -21,7 +21,8 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 export const AppHeader: React.FC = () => {
   const navigate = useNavigate();
-  const { currentUser, signOut } = useAuthStore();
+  const { currentUser: storeUser, signOut } = useAuthStore();
+  const currentUser = storeUser || db.getCurrentUser();
   const { toggleSidebar, toggleMobileDrawer, setAdvancedSearchOpen, setKeyboardShortcutsOpen } = useUIStore();
   const { searchQuery, setSearchQuery, setCurrentFolder } = useMailStore();
 

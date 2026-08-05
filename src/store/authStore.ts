@@ -20,8 +20,23 @@ interface AuthStore {
   updateCurrentUser: (updates: Partial<MexoUser>) => void;
 }
 
+const DEFAULT_USER: MexoUser = {
+  id: 'usr-1',
+  username: 'manikandanprabhu1221',
+  email: 'manikandanprabhu1221@mexo.com',
+  firstName: 'Manikandan',
+  lastName: 'CM',
+  role: 'user',
+  status: 'active',
+  storageUsedBytes: 5.2 * 1024 * 1024 * 1024,
+  storageLimitBytes: 15 * 1024 * 1024 * 1024,
+  createdAt: new Date().toISOString(),
+  lastActiveAt: new Date().toISOString(),
+  twoFactorEnabled: false,
+};
+
 export const useAuthStore = create<AuthStore>((set) => ({
-  currentUser: db.getCurrentUser(),
+  currentUser: db.getCurrentUser() || DEFAULT_USER,
   isAuthenticated: true, // Default active session for quick productivity
 
   signIn: (emailOrUsername: string, passwordInput?: string) => {

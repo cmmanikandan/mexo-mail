@@ -46,22 +46,23 @@ export const AppSidebar: React.FC = () => {
   // Read live labels from persistent DB
   const [labels, setLabels] = useState<Label[]>(db.getLabels());
   const currentUser = db.getCurrentUser();
+  const userEmail = currentUser?.email || 'manikandanprabhu1221@mexo.com';
 
   const refreshLabels = () => {
     setLabels(db.getLabels());
   };
 
   const { unreadInboxCount, draftCount } = React.useMemo(() => {
-    const msgs = db.getMessagesForUser(currentUser.email);
+    const msgs = db.getMessagesForUser(userEmail);
     const now = Date.now();
     const unread = msgs.filter((m) => {
       const st = m.userState;
       const isSnoozedActive = st.snoozedUntil ? new Date(st.snoozedUntil).getTime() > now : false;
       return !st.isRead && !st.isArchived && !st.isDeleted && !st.isSpam && !isSnoozedActive;
     }).length;
-    const drafts = db.getDraftsForUser(currentUser.email).length;
-    return { unreadInboxCount: unread, draftCount: drafts };
-  }, [currentUser.email, lastUpdated, labels]);
+    const drafts = db.getDraftsForUser(userEmail);
+    return { unreadInboxCount: unread, draftCount: drafts.length };
+  }, [userEmail, lastUpdated, labels]);
 
   // Auto-expand "More" section if active route is under More items
   useEffect(() => {
