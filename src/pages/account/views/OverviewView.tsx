@@ -4,6 +4,7 @@ import { useAuthStore } from '../../../store/authStore';
 import { MexoAvatar } from '../../../components/common/MexoAvatar';
 import { MexoButton } from '../../../components/common/MexoButton';
 import { PWAInstallButton } from '../../../components/common/PWAInstallButton';
+import { usePWAInstall } from '../../../hooks/usePWAInstall';
 import {
   User,
   Shield,
@@ -22,6 +23,7 @@ import { format } from 'date-fns';
 export const OverviewView: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuthStore();
+  const { isInstalled } = usePWAInstall();
 
   const formattedCreatedDate = () => {
     try {
@@ -67,24 +69,26 @@ export const OverviewView: React.FC = () => {
         </MexoButton>
       </section>
 
-      {/* PWA App Installation Card */}
-      <section className="p-6 rounded-2xl bg-gradient-to-r from-[#7C3AED]/10 via-[#6366F1]/10 to-[#0878e8]/10 border border-[#7C3AED]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="flex items-center space-x-4">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white flex items-center justify-center shadow-mexo-sm flex-shrink-0">
-            <Download className="w-6 h-6" />
+      {/* PWA App Installation Card (Hidden once app is installed) */}
+      {!isInstalled && (
+        <section className="p-6 rounded-2xl bg-gradient-to-r from-[#7C3AED]/10 via-[#6366F1]/10 to-[#0878e8]/10 border border-[#7C3AED]/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center space-x-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white flex items-center justify-center shadow-mexo-sm flex-shrink-0">
+              <Download className="w-6 h-6" />
+            </div>
+            <div>
+              <h3 className="text-base font-extrabold text-app-heading flex items-center">
+                Install MEXO Mail App
+              </h3>
+              <p className="text-xs text-app-body font-medium mt-0.5">
+                Get the standalone desktop & mobile app experience with offline support and instant notifications.
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="text-base font-extrabold text-app-heading flex items-center">
-              Install MEXO Mail App
-            </h3>
-            <p className="text-xs text-app-body font-medium mt-0.5">
-              Get the standalone desktop & mobile app experience with offline support and instant notifications.
-            </p>
-          </div>
-        </div>
 
-        <PWAInstallButton className="self-start sm:self-center py-2.5 px-5 text-xs shadow-md" />
-      </section>
+          <PWAInstallButton className="self-start sm:self-center py-2.5 px-5 text-xs shadow-md" />
+        </section>
+      )}
 
       {/* Grid of Dedicated Sub-Pages */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

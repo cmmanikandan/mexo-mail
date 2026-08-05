@@ -9,12 +9,7 @@ export const PWAInstallButton: React.FC<{ className?: string; variant?: 'button'
   const { isInstallable, isInstalled, promptInstall } = usePWAInstall();
 
   if (isInstalled) {
-    return (
-      <span className="inline-flex items-center space-x-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/80 px-2.5 py-1 rounded-lg border border-emerald-200/60 dark:border-emerald-800/50">
-        <Check className="w-3.5 h-3.5" />
-        <span>App Installed</span>
-      </span>
-    );
+    return null;
   }
 
   if (variant === 'icon') {

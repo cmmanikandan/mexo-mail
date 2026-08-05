@@ -113,7 +113,7 @@ export const MobileMailDrawer: React.FC = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex select-none md:hidden font-sans text-slate-900 dark:text-slate-100">
+    <div className="fixed inset-0 z-[60] flex select-none md:hidden font-sans text-slate-900 dark:text-slate-100">
       {/* Dark Translucent Backdrop */}
       <div
         onClick={() => setMobileDrawerOpen(false)}
@@ -249,7 +249,7 @@ export const MobileMailDrawer: React.FC = () => {
         </div>
 
         {/* Footer Links: Contacts & Settings */}
-        <div className="p-3 border-t border-app-border space-y-0.5 bg-slate-50/50 dark:bg-slate-900/50">
+        <div className="p-3.5 border-t border-app-border space-y-1 bg-slate-50/50 dark:bg-slate-900/50 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
           <button
             onClick={() => {
               setMobileDrawerOpen(false);
