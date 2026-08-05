@@ -14,6 +14,7 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminStoragePage } from './pages/admin/AdminStoragePage';
 import { AdminMailPoliciesPage } from './pages/admin/AdminMailPoliciesPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { LandingPage } from './pages/landing/LandingPage';
 import { HelpPage } from './pages/support/HelpPage';
 import { PrivacyPage } from './pages/support/PrivacyPage';
 import { TermsPage } from './pages/support/TermsPage';
@@ -46,6 +47,7 @@ const RoutePageTitle: React.FC = () => {
     const APP = 'MEXO Mail';
 
     const titleMap: Record<string, string> = {
+      '/': `MEXO Mail – Simple & Intelligent Email`,
       '/signin': `Sign In – ${APP}`,
       '/signup': `Create Account – ${APP}`,
       '/forgot-password': `Reset Password – ${APP}`,
