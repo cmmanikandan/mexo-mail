@@ -222,9 +222,7 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   return (
     <>
       {isInitializing && <SplashScreen progress={progress} isFadingOut={isFadingOut} />}
-      <div className={isInitializing ? 'opacity-0' : 'opacity-100 transition-opacity duration-300'}>
-        {children}
-      </div>
+      {children}
     </>
   );
 };
