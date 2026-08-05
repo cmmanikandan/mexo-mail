@@ -35,9 +35,14 @@ const DEFAULT_USER: MexoUser = {
   twoFactorEnabled: false,
 };
 
+const initialUserId = typeof localStorage !== 'undefined' ? localStorage.getItem('mexo_current_user_id_v1') : null;
+const hasActiveSession = typeof localStorage !== 'undefined' ? localStorage.getItem('mexo_session_active_v1') === 'true' : false;
+
+const initialUser = initialUserId ? db.getUserById(initialUserId) : null;
+
 export const useAuthStore = create<AuthStore>((set) => ({
-  currentUser: db.getCurrentUser() || DEFAULT_USER,
-  isAuthenticated: true, // Default active session for quick productivity
+  currentUser: initialUser || db.getCurrentUser(),
+  isAuthenticated: hasActiveSession,
 
   signIn: (emailOrUsername: string, passwordInput?: string) => {
     let clean = emailOrUsername.trim().toLowerCase();
@@ -66,6 +71,9 @@ export const useAuthStore = create<AuthStore>((set) => ({
     }
 
     db.setCurrentUser(user.id);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('mexo_session_active_v1', 'true');
+    }
     set({ currentUser: user, isAuthenticated: true });
     db.addAuditLog(user.email, 'USER_SIGN_IN', user.email, 'success');
     return true;
@@ -73,14 +81,24 @@ export const useAuthStore = create<AuthStore>((set) => ({
 
   signUp: (data) => {
     const newUser = db.createUser(data);
+    db.setCurrentUser(newUser.id);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem('mexo_session_active_v1', 'true');
+    }
     set({ currentUser: newUser, isAuthenticated: true });
     return newUser;
   },
 
   signOut: () => {
     const user = db.getCurrentUser();
-    db.addAuditLog(user.email, 'USER_SIGN_OUT', user.email, 'success');
-    set({ isAuthenticated: false });
+    if (user) {
+      db.addAuditLog(user.email, 'USER_SIGN_OUT', user.email, 'success');
+    }
+    db.setCurrentUser('');
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('mexo_session_active_v1');
+    }
+    set({ currentUser: null as any, isAuthenticated: false });
   },
 
   updateCurrentUser: (updates) => {

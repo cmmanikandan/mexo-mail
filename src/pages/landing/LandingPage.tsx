@@ -82,8 +82,10 @@ export const LandingPage: React.FC = () => {
             <span>MEXO Mail</span>
           </div>
 
-          <h1 className="text-4xl sm:text-6xl font-black tracking-tight text-slate-900 dark:text-slate-100 leading-tight">
-            Email, made simpler.
+          <h1 className="text-4xl sm:text-6xl font-black tracking-tight leading-tight">
+            <span className="bg-gradient-to-r from-[#7C3AED] via-[#6366F1] to-[#0878e8] bg-clip-text text-transparent">
+              Email, made simpler.
+            </span>
           </h1>
 
           <p className="text-base sm:text-lg text-slate-600 dark:text-slate-400 font-medium max-w-2xl mx-auto leading-relaxed">
