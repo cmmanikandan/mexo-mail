@@ -105,46 +105,51 @@ const RoutePageTitle: React.FC = () => {
 
 export const AppContent: React.FC = () => {
   return (
-    <Routes>
-      {/* Route-aware page title updater (non-mail pages) */}
-      <Route path="*" element={<RoutePageTitle />} />
+    <>
+      <RoutePageTitle />
+      <Routes>
+        {/* Landing Page */}
+        <Route path="/" element={<LandingPage />} />
 
-      {/* Auth Routes */}
-      <Route path="/signin" element={<SignInPage />} />
-      <Route path="/signup" element={<SignUpPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        {/* Auth Routes */}
+        <Route path="/login" element={<Navigate to="/signin" replace />} />
+        <Route path="/signin" element={<SignInPage />} />
+        <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-      {/* Public Support & Legal Routes */}
-      <Route path="/help" element={<HelpPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/terms" element={<TermsPage />} />
+        {/* Public Support & Legal Routes */}
+        <Route path="/help" element={<HelpPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
+        <Route path="/terms" element={<TermsPage />} />
 
-      {/* Mail Routes */}
-      <Route path="/mail/:folder" element={<ProtectedRoute><MailFolderPage /></ProtectedRoute>} />
-      <Route path="/mail/thread/:id" element={<ProtectedRoute><ThreadDetailPage /></ProtectedRoute>} />
+        {/* Mail Routes */}
+        <Route path="/mail" element={<Navigate to="/mail/inbox" replace />} />
+        <Route path="/mail/:folder" element={<ProtectedRoute><MailFolderPage /></ProtectedRoute>} />
+        <Route path="/mail/thread/:id" element={<ProtectedRoute><ThreadDetailPage /></ProtectedRoute>} />
 
-      {/* Contacts Route */}
-      <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
+        {/* Contacts Route */}
+        <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
 
-      {/* Settings Routes */}
-      <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
-      <Route path="/settings/*" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+        {/* Settings Routes */}
+        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+        <Route path="/settings/*" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 
-      {/* Account Routes */}
-      <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
-      <Route path="/account/*" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        {/* Account Routes */}
+        <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
+        <Route path="/account/*" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
 
-      {/* Admin Routes */}
-      <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
-      <Route path="/admin/users" element={<AdminRoute><AdminUsersPage /></AdminRoute>} />
-      <Route path="/admin/mail-policies" element={<AdminRoute><AdminMailPoliciesPage /></AdminRoute>} />
-      <Route path="/admin/storage" element={<AdminRoute><AdminStoragePage /></AdminRoute>} />
-      <Route path="/admin/security" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
-      <Route path="/admin/audit" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
+        {/* Admin Routes */}
+        <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
+        <Route path="/admin/users" element={<AdminRoute><AdminUsersPage /></AdminRoute>} />
+        <Route path="/admin/mail-policies" element={<AdminRoute><AdminMailPoliciesPage /></AdminRoute>} />
+        <Route path="/admin/storage" element={<AdminRoute><AdminStoragePage /></AdminRoute>} />
+        <Route path="/admin/security" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
+        <Route path="/admin/audit" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
 
-      {/* Default Fallback */}
-      <Route path="*" element={<Navigate to="/mail/inbox" replace />} />
-    </Routes>
+        {/* Default Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 };
 
