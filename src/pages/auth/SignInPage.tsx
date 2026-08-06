@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { MexoAuthShell } from '../../components/auth/MexoAuthShell';
 import { AuthTextField } from '../../components/auth/AuthTextField';
@@ -21,9 +21,6 @@ export const SignInPage: React.FC = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const step1InputRef = useRef<HTMLInputElement>(null);
-  const step2InputRef = useRef<HTMLInputElement>(null);
-
   // Auto-redirect if user is already authenticated
   useEffect(() => {
     if (!authLoading && isAuthenticated && currentUser) {
@@ -34,21 +31,6 @@ export const SignInPage: React.FC = () => {
       }
     }
   }, [isAuthenticated, currentUser, authLoading, navigate]);
-
-  // Auto-focus and select text field on step change
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (step === 1 && step1InputRef.current) {
-        step1InputRef.current.focus();
-        step1InputRef.current.select();
-      } else if (step === 2 && step2InputRef.current) {
-        step2InputRef.current.focus();
-        step2InputRef.current.select();
-      }
-    }, 80);
-
-    return () => clearTimeout(timer);
-  }, [step]);
 
   const handleStep1Next = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,7 +94,7 @@ export const SignInPage: React.FC = () => {
     <MexoAuthShell leftBrandSubtitle="Your conversations, connected in one place.">
       {/* STEP 1: Address Input */}
       {step === 1 && (
-        <form onSubmit={handleStep1Next} className="w-full">
+        <form onSubmit={handleStep1Next} autoComplete="off" className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-bold text-slate-900 dark:text-slate-100 tracking-tight">
               Sign in
@@ -124,7 +106,8 @@ export const SignInPage: React.FC = () => {
 
           <div className="mt-7 space-y-2">
             <AuthTextField
-              ref={step1InputRef}
+              name="mexo_user_identifier"
+              autoComplete="off"
               label="Register No / Username / Email"
               value={usernameInput}
               error={error}
@@ -132,7 +115,6 @@ export const SignInPage: React.FC = () => {
                 setUsernameInput(e.target.value);
                 if (error) setError('');
               }}
-              autoFocus
             />
 
             <div className="text-left pt-1">
@@ -167,7 +149,7 @@ export const SignInPage: React.FC = () => {
 
       {/* STEP 2: Password Input */}
       {step === 2 && (
-        <form onSubmit={handleStep2SignIn} className="w-full">
+        <form onSubmit={handleStep2SignIn} autoComplete="off" className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-bold text-slate-900 dark:text-slate-100 tracking-tight">
               Welcome
@@ -188,7 +170,8 @@ export const SignInPage: React.FC = () => {
 
           <div className="mt-4 space-y-2">
             <AuthPasswordField
-              ref={step2InputRef}
+              name="mexo_user_password"
+              autoComplete="current-password"
               label="Enter your password"
               value={password}
               error={error}
@@ -196,7 +179,6 @@ export const SignInPage: React.FC = () => {
                 setPassword(e.target.value);
                 if (error) setError('');
               }}
-              autoFocus
             />
 
             <div className="text-left pt-1">
