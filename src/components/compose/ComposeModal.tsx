@@ -153,7 +153,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       updateCompose(instance.id, {
         attachments: [...instance.attachments, newAtt],
       });
-      addToast({ message: `Attached "${file.name}" via Cloudinary`, type: 'success' });
+      addToast({ message: `Attached "${file.name}"`, type: 'success' });
     } catch (err: any) {
       console.error('Cloudinary upload error:', err);
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
@@ -245,7 +245,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     return (
       <div
         onClick={() => toggleMinimize(instance.id)}
-        className="w-64 h-11 bg-slate-900 text-white rounded-t-xl shadow-mexo-lg border border-slate-800 px-4 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-all select-none"
+        className="w-full sm:w-64 h-12 sm:h-11 bg-slate-900 text-white rounded-t-xl shadow-mexo-lg border border-slate-800 px-4 flex items-center justify-between cursor-pointer hover:bg-slate-800 transition-all select-none fixed sm:relative bottom-16 sm:bottom-0 left-0 right-0 sm:left-auto sm:right-auto z-[60]"
       >
         <span className="text-xs font-semibold truncate">{instance.subject || 'New Message'}</span>
         <div className="flex items-center space-x-1">
@@ -269,12 +269,12 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
   return (
     <div
       style={{
-        transform: instance.isMaximized ? 'none' : `translate(${position.x}px, ${position.y}px)`,
+        transform: instance.isMaximized ? 'none' : (window.innerWidth >= 640 ? `translate(${position.x}px, ${position.y}px)` : 'none'),
       }}
-      className={`bg-white dark:bg-slate-900 rounded-t-2xl shadow-mexo-popover border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden transition-shadow duration-200 ${
+      className={`bg-white dark:bg-slate-900 rounded-none sm:rounded-t-2xl shadow-2xl border-0 sm:border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden transition-all duration-200 ${
         instance.isMaximized
-          ? 'fixed inset-4 z-50 rounded-2xl'
-          : 'w-full md:w-[560px] h-[580px] z-40 max-w-full'
+          ? 'fixed inset-0 sm:inset-4 z-[70] rounded-none sm:rounded-2xl'
+          : 'fixed sm:relative inset-0 sm:inset-auto z-[60] sm:z-40 w-full sm:w-[560px] h-[100dvh] sm:h-[580px] max-w-full'
       }`}
     >
       {/* Compose Header Bar (Draggable) */}
@@ -528,7 +528,7 @@ export const ComposeContainer: React.FC = () => {
   if (instances.length === 0) return null;
 
   return (
-    <div className="fixed bottom-0 right-6 z-40 flex items-end space-x-4 max-w-full">
+    <div className="fixed inset-0 sm:inset-auto sm:bottom-0 sm:right-6 z-[60] flex flex-col sm:flex-row items-end space-y-2 sm:space-y-0 sm:space-x-4 max-w-full pointer-events-none sm:pointer-events-auto [&>*]:pointer-events-auto">
       {instances.map((inst) => (
         <ComposeWindow key={inst.id} instance={inst} />
       ))}

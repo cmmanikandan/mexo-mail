@@ -123,7 +123,6 @@ export const AppHeader: React.FC = () => {
                     { label: 'Unread messages', query: 'is:unread' },
                     { label: 'Messages with attachments', query: 'has:attachment' },
                     { label: 'Starred messages', query: 'is:starred' },
-                    { label: 'Welcome mail', query: 'from:welcome@mexo.com' },
                   ].map((s) => (
                     <button
                       key={s.query}

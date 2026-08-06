@@ -15,12 +15,14 @@ import {
   X,
   ChevronRight,
 } from 'lucide-react';
+import { ProfilePhotoUploader } from '../common/ProfilePhotoUploader';
 
 export const AdminLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentUser, signOut } = useAuthStore();
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
+  const [isPhotoUploaderOpen, setIsPhotoUploaderOpen] = useState(false);
 
   const navSections = [
     {
@@ -81,13 +83,17 @@ export const AdminLayout: React.FC<{ children: React.ReactNode }> = ({ children 
 
         {/* Right Admin Profile */}
         <div className="flex items-center space-x-2 sm:space-x-3">
-          <div className="flex items-center space-x-2.5 p-1 rounded-full sm:rounded-2xl sm:bg-slate-100 dark:sm:bg-slate-800/60 sm:pr-3.5 border border-transparent sm:border-app-border">
-            <MexoAvatar name={`${currentUser.firstName} ${currentUser.lastName}`} src={currentUser.avatarUrl} size="sm" className="w-8 h-8 text-xs shadow-xs" />
+          <button
+            onClick={() => setIsPhotoUploaderOpen(true)}
+            className="flex items-center space-x-2.5 p-1 rounded-full sm:rounded-2xl sm:bg-slate-100 dark:sm:bg-slate-800/60 sm:pr-3.5 border border-transparent sm:border-app-border hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors text-left cursor-pointer group"
+            title="Edit Admin Profile Photo"
+          >
+            <MexoAvatar name={`${currentUser.firstName} ${currentUser.lastName}`} src={currentUser.avatarUrl} size="sm" showBlurCircle={true} className="w-8 h-8 text-xs shadow-xs" />
             <div className="text-left hidden sm:block">
-              <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight">{currentUser.firstName} {currentUser.lastName}</p>
+              <p className="text-xs font-bold text-slate-900 dark:text-slate-100 leading-tight group-hover:text-app-primary transition-colors">{currentUser.firstName} {currentUser.lastName}</p>
               <p className="text-[10px] text-[#7C3AED] dark:text-indigo-400 font-extrabold uppercase tracking-wider">System Admin</p>
             </div>
-          </div>
+          </button>
 
           <button
             onClick={() => {
@@ -100,6 +106,12 @@ export const AdminLayout: React.FC<{ children: React.ReactNode }> = ({ children 
             <LogOut className="w-4.5 h-4.5" />
           </button>
         </div>
+
+        {/* Profile Photo Crop & Fit Uploader Modal */}
+        <ProfilePhotoUploader
+          isOpen={isPhotoUploaderOpen}
+          onClose={() => setIsPhotoUploaderOpen(false)}
+        />
       </header>
 
       {/* Main Layout Body - Fixed Sidebar & Scrollable Main Content */}

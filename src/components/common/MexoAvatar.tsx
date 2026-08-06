@@ -5,6 +5,7 @@ export interface MexoAvatarProps {
   src?: string;
   size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl';
   className?: string;
+  showBlurCircle?: boolean;
 }
 
 export const MexoAvatar: React.FC<MexoAvatarProps> = ({
@@ -12,6 +13,7 @@ export const MexoAvatar: React.FC<MexoAvatarProps> = ({
   src,
   size = 'md',
   className = '',
+  showBlurCircle = false,
 }) => {
   const [hasError, setHasError] = useState(false);
 
@@ -49,18 +51,14 @@ export const MexoAvatar: React.FC<MexoAvatarProps> = ({
     xl: 'w-16 h-16 text-xl font-extrabold',
   };
 
-  if (src && !hasError) {
-    return (
-      <img
-        src={src}
-        alt={name}
-        onError={() => setHasError(true)}
-        className={`rounded-full object-cover shadow-sm ${sizeMap[size]} ${className}`}
-      />
-    );
-  }
-
-  return (
+  const avatarContent = src && !hasError ? (
+    <img
+      src={src}
+      alt={name}
+      onError={() => setHasError(true)}
+      className={`rounded-full object-cover shadow-sm ${sizeMap[size]} ${className}`}
+    />
+  ) : (
     <div
       className={`rounded-full flex items-center justify-center font-bold tracking-tight select-none shadow-sm ${sizeMap[size]} ${getThemeBgColor(
         name
@@ -69,4 +67,15 @@ export const MexoAvatar: React.FC<MexoAvatarProps> = ({
       {getInitials(name)}
     </div>
   );
+
+  if (showBlurCircle) {
+    return (
+      <div className="relative inline-flex items-center justify-center flex-shrink-0">
+        <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] opacity-50 blur-md scale-110 pointer-events-none" />
+        {avatarContent}
+      </div>
+    );
+  }
+
+  return avatarContent;
 };

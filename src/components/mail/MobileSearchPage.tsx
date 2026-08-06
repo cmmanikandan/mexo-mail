@@ -93,12 +93,6 @@ const QUICK_SEARCH_ITEMS: QuickSearchItem[] = [
     internalQuery: 'is:starred',
     icon: <Star className="w-5 h-5 text-amber-500 fill-amber-400" />,
   },
-  {
-    id: 'welcome',
-    label: 'Welcome mail',
-    internalQuery: 'from:welcome@mexo.com',
-    icon: <Sparkles className="w-5 h-5 text-purple-600" />,
-  },
 ];
 
 // ─── MobileSearchPage ────────────────────────────────────────────────────────
@@ -285,7 +279,7 @@ export const MobileSearchPage: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col h-screen bg-white dark:bg-slate-900 fixed inset-0 z-40 overflow-hidden font-sans text-slate-900 dark:text-slate-100">
+    <div className="flex flex-col h-[100dvh] bg-white dark:bg-slate-900 fixed inset-0 z-40 overflow-hidden font-sans text-slate-900 dark:text-slate-100">
       {/* ── 1. Search Header ── */}
       <div className="flex items-center px-3 py-2 border-b border-app-border bg-white dark:bg-slate-900 shadow-sm flex-shrink-0">
         <button
@@ -312,7 +306,7 @@ export const MobileSearchPage: React.FC = () => {
             }}
             onKeyDown={handleInputKeyDown}
             placeholder="Search in mail..."
-            className="w-full h-11 pl-9 pr-9 rounded-2xl bg-[#F0F4F9] dark:bg-slate-800 text-sm text-app-heading placeholder-app-muted border border-transparent focus:border-app-primary focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-app-primary/20 transition-all outline-none"
+            className="w-full h-11 pl-9 pr-9 rounded-2xl bg-[#F0F4F9] dark:bg-slate-800 text-base sm:text-sm text-app-heading placeholder-app-muted border border-transparent focus:border-app-primary focus:bg-white dark:focus:bg-slate-900 focus:ring-2 focus:ring-app-primary/20 transition-all outline-none"
           />
           {displayQuery && (
             <button
@@ -336,7 +330,7 @@ export const MobileSearchPage: React.FC = () => {
       </div>
 
       {/* ── 2. Body Content ── */}
-      <div className="flex-1 overflow-y-auto pb-24">
+      <div className="flex-1 overflow-y-auto pb-28 pb-[calc(6rem+env(safe-area-inset-bottom,0px))]">
         {/* ── State A: Showing Search Results ── */}
         {hasSearched ? (
           <div>
