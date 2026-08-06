@@ -5,7 +5,7 @@ export const MexoAppsLauncher: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const formsUrl = (import.meta as any).env?.VITE_MEXO_FORMS_URL || 'http://localhost:5174';
+  const formsUrl = (import.meta as any).env?.VITE_MEXO_FORMS_URL || 'https://mexo-forms.vercel.app';
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
