@@ -662,7 +662,8 @@ export const api = {
 
   async saveDraft(userId: string, draft: Partial<Draft>): Promise<Draft | null> {
     try {
-      const draftData = {
+      const isUuid = draft.id && /^[0-9a-fA-F-]{36}$/.test(draft.id);
+      const draftData: any = {
         owner_user_id: userId,
         to_recipients: draft.to || [],
         cc_recipients: draft.cc || [],
@@ -671,6 +672,9 @@ export const api = {
         body_html: draft.bodyHtml || '',
         last_saved_at: new Date().toISOString(),
       };
+      if (isUuid) {
+        draftData.id = draft.id;
+      }
 
       const { data, error } = await supabase
         .from('drafts')

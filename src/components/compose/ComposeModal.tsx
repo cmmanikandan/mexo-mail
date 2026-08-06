@@ -223,6 +223,12 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         clientMessageId,
       });
 
+      // Purge any associated draft records on send
+      if (instance.draftId) {
+        db.deleteDraft(instance.draftId);
+      }
+      db.clearDraftsForMessage(senderEmail, instance.to, instance.subject);
+
       useMailStore.getState().triggerRefresh();
 
       // Broadcast to all tabs + trigger same-tab refresh immediately

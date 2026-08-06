@@ -102,30 +102,30 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
 
     if (!hasMeaningfulContent) return;
 
-    get().updateCompose(id, { isSaving: true });
-    
     const draftId = inst.draftId || `drf-${Date.now()}`;
+    get().updateCompose(id, { draftId, isSaving: true });
+    
     const currentUser = useAuthStore.getState().currentUser;
-    if (currentUser?.id) {
-      db.saveDraft(currentUser.id, {
-        id: draftId,
-        userEmail: currentUser.email,
-        to: inst.to,
-        cc: inst.cc,
-        bcc: inst.bcc,
-        subject: inst.subject,
-        bodyHtml: inst.bodyHtml,
-        attachments: inst.attachments,
-        lastSavedAt: new Date().toISOString(),
-      });
-    }
+    const userEmail = currentUser?.email || 'user@mexo.com';
+    const userId = currentUser?.id || 'system-user';
+
+    db.saveDraft(userId, {
+      id: draftId,
+      userEmail,
+      to: inst.to,
+      cc: inst.cc,
+      bcc: inst.bcc,
+      subject: inst.subject,
+      bodyHtml: inst.bodyHtml,
+      attachments: inst.attachments,
+      lastSavedAt: new Date().toISOString(),
+    });
 
     setTimeout(() => {
       get().updateCompose(id, {
-        draftId,
         isSaving: false,
         lastSavedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       });
-    }, 300);
+    }, 200);
   },
 }));
