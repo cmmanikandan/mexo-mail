@@ -320,6 +320,10 @@ export const AdminUsersPage: React.FC = () => {
         failed++;
         errors.push(`${un}@mexo.com — ${err?.message || 'Failed'}`);
       }
+      // Small pause between row requests for smooth progress & avoiding network throttling
+      if (i < csvRows.length - 1) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
     }
 
     setImportProgress(100);

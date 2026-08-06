@@ -224,6 +224,8 @@ export const api = {
   },
 
   // Fallback: client-side user creation (used when RPC is unavailable)
+  // IMPORTANT: saves & restores the current admin session so bulk imports
+  // don't replace the admin's Supabase auth session with the newly-created user.
   async _createUserClientSide(userData: {
     firstName: string;
     lastName: string;
@@ -264,6 +266,11 @@ export const api = {
         };
       }
 
+      // ── Save admin session BEFORE signUp hijacks it ──────────────────────
+      const { data: currentSession } = await supabase.auth.getSession();
+      const adminSession = currentSession?.session ?? null;
+      // ─────────────────────────────────────────────────────────────────────
+
       const { data: authResult, error: authError } = await supabase.auth.signUp({
         email: primaryEmail,
         password: pwd,
@@ -277,6 +284,16 @@ export const api = {
         const { data: signInResult } = await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
         userId = signInResult?.user?.id;
       }
+
+      // ── Restore admin session immediately after getting the new userId ───
+      if (adminSession?.access_token && adminSession?.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
+        });
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       if (!userId) {
         return { user: null, error: authError?.message || 'Could not obtain Auth user ID.' };
       }
