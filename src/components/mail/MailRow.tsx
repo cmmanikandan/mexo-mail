@@ -57,15 +57,6 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
   const isSentFolder = currentFolder === 'sent' || message.senderEmail.toLowerCase() === userEmail;
   const isDraftFolder = currentFolder === 'drafts' || message.id.startsWith('drf-');
 
-  // Profile photo resolution:
-  const senderAvatar = React.useMemo(() => {
-    if (message.senderEmail.toLowerCase() === userEmail) {
-      return currentUser?.avatarUrl || message.senderAvatar;
-    }
-    const senderUser = db.getUserByEmail(message.senderEmail);
-    return senderUser?.avatarUrl || message.senderAvatar;
-  }, [message.senderEmail, message.senderAvatar, userEmail, currentUser?.avatarUrl]);
-
   // Recipient label display for sent emails
   const recipientName = React.useMemo(() => {
     if (!message.recipients || message.recipients.length === 0) return 'No recipients';
@@ -75,19 +66,32 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
     return firstRecip.split('@')[0];
   }, [message.recipients]);
 
-  // Recipient avatar resolution for Sent folder
+  // Recipient avatar resolution for Sent folder — prefer pre-fetched recipientAvatars on message
   const recipientAvatar = React.useMemo(() => {
     if (!message.recipients || message.recipients.length === 0) return undefined;
     const firstRecip = message.recipients[0].toLowerCase().trim();
+    // First check the pre-fetched recipientAvatars attached to the message (from API batch-fetch)
+    if (message.recipientAvatars?.[firstRecip]) return message.recipientAvatars[firstRecip];
+    // Fallback: check cached users
     const recipUser = db.getUserByEmail(firstRecip);
     if (recipUser?.avatarUrl) return recipUser.avatarUrl;
+    // Fallback: check contacts
     const foundContact = db.getContacts().find((c) => c.email.toLowerCase() === firstRecip);
     return foundContact?.avatarUrl;
-  }, [message.recipients]);
+  }, [message.recipients, message.recipientAvatars]);
+
+  // For sent folder, show the current user's own DP when logged in as sender
+  const senderAvatarResolved = React.useMemo(() => {
+    if (message.senderEmail.toLowerCase() === userEmail) {
+      return currentUser?.avatarUrl || message.senderAvatar;
+    }
+    const senderUser = db.getUserByEmail(message.senderEmail);
+    return senderUser?.avatarUrl || message.senderAvatar;
+  }, [message.senderEmail, message.senderAvatar, userEmail, currentUser?.avatarUrl]);
 
   const displayName = isSentFolder ? `To: ${recipientName}` : message.senderName;
   const avatarName = isSentFolder ? recipientName : message.senderName;
-  const avatarSrc = isSentFolder ? recipientAvatar : senderAvatar;
+  const avatarSrc = isSentFolder ? recipientAvatar : senderAvatarResolved;
 
   const handleRowClick = (e: React.MouseEvent) => {
     const targetTag = (e.target as HTMLElement).tagName.toLowerCase();

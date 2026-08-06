@@ -34,6 +34,7 @@ export interface Message {
   senderEmail: string; // e.g. "manikandan@mexo.com"
   senderAvatar?: string;
   recipients: string[]; // Array of recipient emails e.g. ["arun@mexo.com"]
+  recipientAvatars?: Record<string, string>; // email -> avatarUrl map for recipient photo display
   cc?: string[];
   bcc?: string[];
   subject: string;

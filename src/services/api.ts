@@ -533,27 +533,29 @@ export const api = {
 
       const userEmail = userProfile?.primary_address || '';
 
-      // Collect all sender addresses to batch-fetch avatar URLs from profiles table
-      const senderAddresses = Array.from(
+      // Collect all sender AND recipient addresses to batch-fetch avatar URLs
+      const allAddresses = Array.from(
         new Set(
-          data
-            .map((item: any) => {
-              const msg: any = Array.isArray(item.messages) ? item.messages[0] : item.messages;
-              return msg?.sender_address?.toLowerCase()?.trim();
-            })
-            .filter(Boolean)
+          data.flatMap((item: any) => {
+            const msg: any = Array.isArray(item.messages) ? item.messages[0] : item.messages;
+            const sender = msg?.sender_address?.toLowerCase()?.trim();
+            const recips: string[] = (msg?.message_recipients || []).map((r: any) =>
+              r.recipient_address?.toLowerCase()?.trim()
+            ).filter(Boolean);
+            return [sender, ...recips].filter(Boolean);
+          })
         )
       );
 
       const avatarMap = new Map<string, string>();
-      if (senderAddresses.length > 0) {
-        const { data: senderProfiles } = await supabase
+      if (allAddresses.length > 0) {
+        const { data: profiles } = await supabase
           .from('profiles')
           .select('primary_address, avatar_url')
-          .in('primary_address', senderAddresses);
+          .in('primary_address', allAddresses);
 
-        if (senderProfiles) {
-          senderProfiles.forEach((p: any) => {
+        if (profiles) {
+          profiles.forEach((p: any) => {
             if (p.avatar_url && p.primary_address) {
               avatarMap.set(p.primary_address.toLowerCase().trim(), p.avatar_url);
             }
@@ -576,6 +578,14 @@ export const api = {
         const senderAvatar = avatarMap.get(senderAddr.toLowerCase().trim()) || undefined;
         const parsedAttachments = msg.attachments && Array.isArray(msg.attachments) ? msg.attachments : [];
 
+        // Build recipientAvatars map for Sent folder display
+        const recipientAvatars: Record<string, string> = {};
+        recipList.forEach((r: string) => {
+          const rLower = r.toLowerCase().trim();
+          const av = avatarMap.get(rLower);
+          if (av) recipientAvatars[rLower] = av;
+        });
+
         result.push({
           id: item.id,
           threadId: msg.thread_id || item.id,
@@ -583,6 +593,7 @@ export const api = {
           senderEmail: senderAddr,
           senderAvatar: senderAvatar,
           recipients: recipList.length > 0 ? recipList : [userEmail],
+          recipientAvatars: Object.keys(recipientAvatars).length > 0 ? recipientAvatars : undefined,
           subject: msg.subject || '(no subject)',
           bodyHtml: msg.body_html || '',
           snippet: msg.body_text?.substring(0, 120) || '',
