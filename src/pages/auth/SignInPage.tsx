@@ -9,6 +9,8 @@ import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
 import { api } from '../../services/api';
 
+import { MexoAvatar } from '../../components/common/MexoAvatar';
+
 export const SignInPage: React.FC = () => {
   const navigate = useNavigate();
   const { signIn, isAuthenticated, currentUser, isLoading: authLoading } = useAuthStore();
@@ -17,6 +19,8 @@ export const SignInPage: React.FC = () => {
   const [step, setStep] = useState<1 | 2>(1);
   const [usernameInput, setUsernameInput] = useState('');
   const [resolvedEmail, setResolvedEmail] = useState('');
+  const [userAvatar, setUserAvatar] = useState<string | undefined>(undefined);
+  const [userDisplayName, setUserDisplayName] = useState<string | undefined>(undefined);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -50,6 +54,10 @@ export const SignInPage: React.FC = () => {
         return;
       }
       setResolvedEmail(verification.email);
+      if (verification.user) {
+        setUserAvatar(verification.user.avatarUrl);
+        setUserDisplayName(`${verification.user.firstName} ${verification.user.lastName}`.trim() || verification.user.username);
+      }
       setStep(2);
     } catch {
       setError("Couldn't find your MEXO Account");
@@ -154,15 +162,29 @@ export const SignInPage: React.FC = () => {
       {/* STEP 2: Password Input */}
       {step === 2 && (
         <form onSubmit={handleStep2SignIn} autoComplete="off" className="w-full">
-          <div>
-            <h2 className="text-2xl md:text-[32px] font-bold text-slate-900 dark:text-slate-100 tracking-tight">
-              Welcome
-            </h2>
+          <div className="flex flex-col items-start space-y-3">
+            <div className="flex items-center space-x-3.5">
+              <MexoAvatar
+                name={userDisplayName || resolvedEmail}
+                src={userAvatar}
+                size="lg"
+                className="w-12 h-12 rounded-2xl border-2 border-[#7C3AED]/30 shadow-sm object-cover flex-shrink-0"
+              />
+              <div>
+                <h2 className="text-2xl md:text-[28px] font-extrabold text-slate-900 dark:text-slate-100 tracking-tight leading-tight">
+                  Welcome{userDisplayName ? `, ${userDisplayName.split(' ')[0]}` : ''}
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                  Enter password to continue
+                </p>
+              </div>
+            </div>
             
-            <div className="mt-3">
+            <div className="mt-1">
               <AccountChip
                 email={resolvedEmail}
-                name={usernameInput}
+                name={userDisplayName || usernameInput}
+                avatarUrl={userAvatar}
                 onClickChange={() => {
                   setStep(1);
                   setPassword('');
