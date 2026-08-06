@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { MexoAuthShell } from '../../components/auth/MexoAuthShell';
 import { AuthTextField } from '../../components/auth/AuthTextField';
@@ -11,7 +11,7 @@ import { api } from '../../services/api';
 
 export const SignInPage: React.FC = () => {
   const navigate = useNavigate();
-  const { signIn } = useAuthStore();
+  const { signIn, isAuthenticated, currentUser, isLoading: authLoading } = useAuthStore();
   const { addToast } = useUIStore();
 
   const [step, setStep] = useState<1 | 2>(1);
@@ -20,6 +20,35 @@ export const SignInPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+
+  const step1InputRef = useRef<HTMLInputElement>(null);
+  const step2InputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-redirect if user is already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && currentUser) {
+      if (currentUser.role === 'system_admin') {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate('/mail/inbox', { replace: true });
+      }
+    }
+  }, [isAuthenticated, currentUser, authLoading, navigate]);
+
+  // Auto-focus and select text field on step change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (step === 1 && step1InputRef.current) {
+        step1InputRef.current.focus();
+        step1InputRef.current.select();
+      } else if (step === 2 && step2InputRef.current) {
+        step2InputRef.current.focus();
+        step2InputRef.current.select();
+      }
+    }, 80);
+
+    return () => clearTimeout(timer);
+  }, [step]);
 
   const handleStep1Next = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,10 +86,10 @@ export const SignInPage: React.FC = () => {
       const success = await signIn(usernameInput, password);
       if (success) {
         useUIStore.getState().setMobileDrawerOpen(false);
-        const currentUser = useAuthStore.getState().currentUser;
-        if (currentUser) {
-          addToast({ message: `Signed in as ${currentUser.firstName} (${currentUser.email})`, type: 'success' });
-          if (currentUser.role === 'system_admin') {
+        const activeUser = useAuthStore.getState().currentUser;
+        if (activeUser) {
+          addToast({ message: `Signed in as ${activeUser.firstName} (${activeUser.email})`, type: 'success' });
+          if (activeUser.role === 'system_admin') {
             navigate('/admin');
           } else {
             navigate('/mail/inbox');
@@ -95,6 +124,7 @@ export const SignInPage: React.FC = () => {
 
           <div className="mt-7 space-y-2">
             <AuthTextField
+              ref={step1InputRef}
               label="Register No / Username / Email"
               value={usernameInput}
               error={error}
@@ -158,6 +188,7 @@ export const SignInPage: React.FC = () => {
 
           <div className="mt-4 space-y-2">
             <AuthPasswordField
+              ref={step2InputRef}
               label="Enter your password"
               value={password}
               error={error}

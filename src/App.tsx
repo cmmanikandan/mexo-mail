@@ -125,6 +125,8 @@ export const AppContent: React.FC = () => {
         <Route path="/mail/:folder" element={<ProtectedRoute><MailFolderPage /></ProtectedRoute>} />
         <Route path="/mail/thread/:id" element={<ProtectedRoute><ThreadDetailPage /></ProtectedRoute>} />
 
+        <Route path="/groups" element={<ProtectedRoute><GroupsPage /></ProtectedRoute>} />
+        <Route path="/groups/:id" element={<ProtectedRoute><GroupDetailPage /></ProtectedRoute>} />
         <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
 
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
@@ -150,7 +152,7 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [progress, setProgress] = useState(15);
-  const { initializeAuth } = useAuthStore();
+  const { initializeAuth, isLoading } = useAuthStore();
 
   useEffect(() => {
     let isMounted = true;
@@ -158,11 +160,9 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     // Trigger Cloud Auth Initialization
     initializeAuth();
 
-    const t1 = setTimeout(() => { if (isMounted) setProgress(35); }, 120);
-    const t2 = setTimeout(() => { if (isMounted) setProgress(68); }, 280);
-    const t3 = setTimeout(() => { if (isMounted) setProgress(88); }, 450);
-    const t4 = setTimeout(() => { if (isMounted) setProgress(95); }, 600);
-    const t5 = setTimeout(() => {
+    const t1 = setTimeout(() => { if (isMounted) setProgress(40); }, 100);
+    const t2 = setTimeout(() => { if (isMounted) setProgress(75); }, 200);
+    const t3 = setTimeout(() => {
       if (isMounted) {
         setProgress(100);
         setTimeout(() => {
@@ -174,21 +174,19 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
           }
         }, 150);
       }
-    }, 750);
+    }, 450);
 
     return () => {
       isMounted = false;
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
-      clearTimeout(t4);
-      clearTimeout(t5);
     };
   }, [initializeAuth]);
 
   return (
     <>
-      {isInitializing && <SplashScreen progress={progress} isFadingOut={isFadingOut} />}
+      {(isInitializing || isLoading) && <SplashScreen progress={progress} isFadingOut={isFadingOut && !isLoading} />}
       {children}
     </>
   );
