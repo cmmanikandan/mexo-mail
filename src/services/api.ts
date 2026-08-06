@@ -397,6 +397,18 @@ export const api = {
   },
 
 
+  async updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to update password.' };
+    }
+  },
+
   async updateUserProfile(userId: string, updates: Partial<MexoUser>): Promise<MexoUser | null> {
 
     try {

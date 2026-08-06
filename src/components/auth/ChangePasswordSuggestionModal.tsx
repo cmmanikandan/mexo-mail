@@ -1,0 +1,154 @@
+import React, { useState } from 'react';
+import { MexoModal } from '../common/MexoModal';
+import { MexoButton } from '../common/MexoButton';
+import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+import { ShieldAlert, Eye, EyeOff, CheckCircle2, Lock } from 'lucide-react';
+import { api } from '../../services/api';
+import { useAuthStore } from '../../store/authStore';
+import { useUIStore } from '../../store/uiStore';
+
+interface ChangePasswordSuggestionModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionModalProps> = ({
+  isOpen,
+  onClose,
+}) => {
+  const { addToast } = useUIStore();
+  const { clearDefaultPasswordFlag } = useAuthStore();
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPassword) {
+      setError('Please enter a new password.');
+      return;
+    }
+    if (newPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    try {
+      setIsLoading(true);
+      setError('');
+
+      const res = await api.updateUserPassword(newPassword);
+      if (res.success) {
+        addToast({ message: 'Password updated successfully! Your account is now secured.', type: 'success' });
+        clearDefaultPasswordFlag();
+        onClose();
+      } else {
+        setError(res.error || 'Failed to update password. Try again.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Password update failed.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <MexoModal isOpen={isOpen} onClose={onClose} title="Security Recommendation" maxWidth="md">
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Banner */}
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 flex items-start space-x-3">
+          <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 flex-shrink-0">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <div>
+            <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+              Default Password Detected
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+              Your account was setup with a default password (same as your username). For your privacy & security, we strongly recommend choosing a custom password.
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs font-semibold text-red-600 dark:text-red-400">
+            {error}
+          </div>
+        )}
+
+        {/* New Password Input */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+            New Password
+          </label>
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={newPassword}
+              onChange={(e) => {
+                setNewPassword(e.target.value);
+                if (error) setError('');
+              }}
+              placeholder="Enter new strong password"
+              required
+              className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-app-border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none focus:border-[#7C3AED]"
+            />
+            <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            >
+              {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+            </button>
+          </div>
+
+          <PasswordStrengthIndicator password={newPassword} />
+        </div>
+
+        {/* Confirm Password Input */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+            Confirm New Password
+          </label>
+          <div className="relative">
+            <input
+              type={showPassword ? 'text' : 'password'}
+              value={confirmPassword}
+              onChange={(e) => {
+                setConfirmPassword(e.target.value);
+                if (error) setError('');
+              }}
+              placeholder="Re-enter new password"
+              required
+              className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-app-border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none focus:border-[#7C3AED]"
+            />
+            <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+          </div>
+        </div>
+
+        {/* Buttons */}
+        <div className="flex items-center justify-between pt-3 border-t border-app-border">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-xs font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
+          >
+            Remind Me Later
+          </button>
+
+          <MexoButton type="submit" isLoading={isLoading} size="md" className="px-6 rounded-xl font-bold text-xs">
+            <CheckCircle2 className="w-4 h-4 mr-1.5 inline" />
+            Update Password Now
+          </MexoButton>
+        </div>
+      </form>
+    </MexoModal>
+  );
+};

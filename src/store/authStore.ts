@@ -22,6 +22,7 @@ interface AuthStore {
   currentUser: MexoUser;
   isAuthenticated: boolean;
   isLoading: boolean;
+  isDefaultPasswordUser: boolean;
   error: string | null;
   signIn: (emailOrUsername: string, passwordInput: string) => Promise<boolean>;
   signUp: (data: {
@@ -37,19 +38,29 @@ interface AuthStore {
   signOut: () => Promise<void>;
   updateCurrentUser: (updates: Partial<MexoUser>) => Promise<void>;
   initializeAuth: () => Promise<void>;
+  clearDefaultPasswordFlag: () => void;
 }
 
 const STORAGE_KEY_ACTIVE_USER = 'mexo_active_user';
+const STORAGE_KEY_DEFAULT_PWD = 'mexo_default_pwd';
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
   currentUser: DEFAULT_GUEST_USER,
   isAuthenticated: false,
   isLoading: true,
+  isDefaultPasswordUser: false,
   error: null,
+
+  clearDefaultPasswordFlag: () => {
+    localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
+    set({ isDefaultPasswordUser: false });
+  },
 
   initializeAuth: async () => {
     try {
       set({ isLoading: true, error: null });
+
+      const isDefaultPwd = localStorage.getItem(STORAGE_KEY_DEFAULT_PWD) === 'true';
 
       // 1. Check active Supabase session
       const { data: sessionData } = await supabase.auth.getSession();
@@ -62,7 +73,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         }
         if (profile && profile.status !== 'suspended') {
           localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
-          set({ currentUser: profile, isAuthenticated: true, isLoading: false });
+          set({
+            currentUser: profile,
+            isAuthenticated: true,
+            isDefaultPasswordUser: isDefaultPwd,
+            isLoading: false,
+          });
           return;
         }
       }
@@ -73,7 +89,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         try {
           const cachedUser = JSON.parse(cachedUserRaw) as MexoUser;
           if (cachedUser && cachedUser.id && cachedUser.email && cachedUser.status !== 'suspended') {
-            set({ currentUser: cachedUser, isAuthenticated: true, isLoading: false });
+            set({
+              currentUser: cachedUser,
+              isAuthenticated: true,
+              isDefaultPasswordUser: isDefaultPwd,
+              isLoading: false,
+            });
             // Asynchronously refresh user profile from database in background if available
             api.getUserProfileByEmail(cachedUser.email).then((dbProfile) => {
               if (dbProfile && dbProfile.status !== 'suspended') {
@@ -90,10 +111,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       }
 
       // 3. New / Unauthenticated user
-      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false });
+      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isDefaultPasswordUser: false, isLoading: false });
     } catch (err) {
       console.error('Auth initialization failed:', err);
-      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false });
+      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isDefaultPasswordUser: false, isLoading: false });
     }
   },
 
@@ -133,8 +154,22 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
       // Successful sign in if profile exists and is active
       if (profile && profile.status !== 'suspended') {
+        const cleanInputUsername = emailOrUsername.trim().toLowerCase().split('@')[0];
+        const isDefaultPassword = cleanPassword.toLowerCase() === profile.username.toLowerCase() || cleanPassword.toLowerCase() === cleanInputUsername;
+
+        if (isDefaultPassword) {
+          localStorage.setItem(STORAGE_KEY_DEFAULT_PWD, 'true');
+        } else {
+          localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
+        }
+
         localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
-        set({ currentUser: profile, isAuthenticated: true, isLoading: false });
+        set({
+          currentUser: profile,
+          isAuthenticated: true,
+          isDefaultPasswordUser: isDefaultPassword,
+          isLoading: false,
+        });
         await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
         return true;
       }
@@ -181,8 +216,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       await api.addAuditLog(current.email, 'USER_SIGN_OUT', current.email, 'success');
     }
     localStorage.removeItem(STORAGE_KEY_ACTIVE_USER);
+    localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
     await supabase.auth.signOut();
-    set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false, error: null });
+    set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isDefaultPasswordUser: false, isLoading: false, error: null });
   },
 
   updateCurrentUser: async (updates) => {
