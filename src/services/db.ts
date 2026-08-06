@@ -490,6 +490,7 @@ class MexoDatabase {
 
   saveMessages(messages: Message[]) {
     localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(messages));
+    cloudSync.pushCloudDatabase({ messages }).catch(() => {});
   }
 
   getMessagesForUser(userEmail: string): Message[] {
@@ -702,12 +703,14 @@ class MexoDatabase {
       drafts.push(draftToSave);
     }
     localStorage.setItem(STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+    cloudSync.pushCloudDatabase({ drafts }).catch(() => {});
     return draftToSave;
   }
 
   deleteDraft(draftId: string) {
     const drafts = this.getDrafts().filter((d) => d.id !== draftId);
     localStorage.setItem(STORAGE_KEYS.DRAFTS, JSON.stringify(drafts));
+    cloudSync.pushCloudDatabase({ drafts }).catch(() => {});
   }
 
   // --- GROUPS APIS ---
@@ -760,6 +763,7 @@ class MexoDatabase {
 
     groups.push(newGroup);
     localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(groups));
+    cloudSync.pushCloudDatabase({ groups }).catch(() => {});
     this.addAuditLog(currentUser.email, 'GROUP_CREATED', newGroup.address, 'success');
     return newGroup;
   }
@@ -781,6 +785,7 @@ class MexoDatabase {
         });
         grp.memberCount = grp.members.length;
         localStorage.setItem(STORAGE_KEYS.GROUPS, JSON.stringify(groups));
+        cloudSync.pushCloudDatabase({ groups }).catch(() => {});
       }
     }
   }
@@ -799,6 +804,7 @@ class MexoDatabase {
     };
     contacts.push(newContact);
     localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+    cloudSync.pushCloudDatabase({ contacts }).catch(() => {});
     return newContact;
   }
 
@@ -808,6 +814,7 @@ class MexoDatabase {
     if (idx !== -1) {
       contacts[idx] = { ...contacts[idx], ...updates };
       localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+      cloudSync.pushCloudDatabase({ contacts }).catch(() => {});
       return contacts[idx];
     }
     throw new Error('Contact not found');
@@ -816,6 +823,7 @@ class MexoDatabase {
   deleteContact(id: string) {
     const contacts = this.getContacts().filter((c) => c.id !== id);
     localStorage.setItem(STORAGE_KEYS.CONTACTS, JSON.stringify(contacts));
+    cloudSync.pushCloudDatabase({ contacts }).catch(() => {});
   }
 
   // --- LABELS APIS ---
@@ -834,6 +842,7 @@ class MexoDatabase {
     };
     labels.push(newLabel);
     localStorage.setItem(STORAGE_KEYS.LABELS, JSON.stringify(labels));
+    cloudSync.pushCloudDatabase({ labels }).catch(() => {});
     return newLabel;
   }
 
@@ -843,6 +852,7 @@ class MexoDatabase {
     if (idx !== -1) {
       labels[idx] = { ...labels[idx], ...updates };
       localStorage.setItem(STORAGE_KEYS.LABELS, JSON.stringify(labels));
+      cloudSync.pushCloudDatabase({ labels }).catch(() => {});
       return labels[idx];
     }
     throw new Error('Label not found');
@@ -851,6 +861,7 @@ class MexoDatabase {
   deleteLabel(id: string) {
     const labels = this.getLabels().filter((l) => l.id !== id && l.parentLabelId !== id);
     localStorage.setItem(STORAGE_KEYS.LABELS, JSON.stringify(labels));
+    cloudSync.pushCloudDatabase({ labels }).catch(() => {});
   }
 
   assignLabelsToMessage(messageId: string, labelIds: string[]) {
