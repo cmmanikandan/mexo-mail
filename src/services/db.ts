@@ -125,10 +125,18 @@ class MexoDatabase {
     }
     this.syncCloudUsers().catch(() => {});
 
-    // Messages: seed if missing or empty
+    // Messages: purge demo messages and initialize clean store
     const storedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
-    if (!storedMessages || JSON.parse(storedMessages).length === 0) {
-      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(INITIAL_MESSAGES));
+    if (storedMessages) {
+      try {
+        const msgs: Message[] = JSON.parse(storedMessages);
+        const nonDemoMsgs = msgs.filter((m) => !['msg-101', 'msg-102', 'msg-103', 'msg-104'].includes(m.id));
+        localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(nonDemoMsgs));
+      } catch {
+        localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify([]));
+      }
+    } else {
+      localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify([]));
     }
 
     if (!localStorage.getItem(STORAGE_KEYS.GROUPS)) {
