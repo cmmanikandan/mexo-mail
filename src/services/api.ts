@@ -400,24 +400,40 @@ export const api = {
 
   async updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log('[AUTH] Password update initiated');
       let session: any = null;
       try {
         session = await mexoPlatformAuth.ensureAuthenticatedSession();
-      } catch {
+      } catch (e: any) {
+        console.error('[AUTH] Session verification error:', e);
         return { success: false, error: 'SESSION_EXPIRED' };
       }
 
       if (!session?.user) {
+        console.error('[AUTH] Password update failed: No active Supabase Auth user session.');
         return { success: false, error: 'SESSION_EXPIRED' };
       }
 
+      console.log('[AUTH] Executing Supabase Auth updateUser for user ID:', session.user.id);
       const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
       if (updateError) {
+        console.error('[AUTH] Supabase Auth updateUser error:', updateError.message);
         return { success: false, error: updateError.message };
+      }
+
+      console.log('[AUTH] Password updated successfully in Supabase Auth server!');
+
+      // Synchronize database profile timestamp
+      if (session.user.email) {
+        await supabase
+          .from('profiles')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', session.user.id);
       }
 
       return { success: true };
     } catch (err: any) {
+      console.error('[AUTH] Password update exception:', err);
       return { success: false, error: err?.message || 'Failed to update password.' };
     }
   },
