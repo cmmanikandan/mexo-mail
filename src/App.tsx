@@ -23,7 +23,7 @@ import { SplashScreen } from './components/common/SplashScreen';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuthStore();
-  if (isLoading) return null;
+  if (isLoading && !isAuthenticated) return null;
   if (!isAuthenticated) {
     return <Navigate to="/signin" replace />;
   }
@@ -32,7 +32,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser, isAuthenticated, isLoading } = useAuthStore();
-  if (isLoading) return null;
+  if (isLoading && !isAuthenticated) return null;
   if (!isAuthenticated || currentUser?.role !== 'system_admin') {
     return <Navigate to="/mail/inbox" replace />;
   }
@@ -98,8 +98,7 @@ const RoutePageTitle: React.FC = () => {
 };
 
 const RootRoute: React.FC = () => {
-  const { isAuthenticated, isLoading } = useAuthStore();
-  if (isLoading) return null;
+  const { isAuthenticated } = useAuthStore();
   if (isAuthenticated) {
     return <Navigate to="/mail/inbox" replace />;
   }
@@ -152,12 +151,12 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [progress, setProgress] = useState(15);
-  const { initializeAuth, isLoading } = useAuthStore();
+  const { initializeAuth } = useAuthStore();
 
   useEffect(() => {
     let isMounted = true;
 
-    // Trigger Cloud Auth Initialization
+    // Trigger Cloud Auth Initialization on website open / refresh only
     initializeAuth();
 
     const t1 = setTimeout(() => { if (isMounted) setProgress(40); }, 100);
@@ -186,7 +185,7 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
 
   return (
     <>
-      {(isInitializing || isLoading) && <SplashScreen progress={progress} isFadingOut={isFadingOut && !isLoading} />}
+      {isInitializing && <SplashScreen progress={progress} isFadingOut={isFadingOut} />}
       {children}
     </>
   );
