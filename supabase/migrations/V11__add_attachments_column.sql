@@ -4,6 +4,9 @@
 ALTER TABLE public.messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb;
 
 -- 2. Update send_mail_transaction RPC to accept p_attachments JSONB
+DROP FUNCTION IF EXISTS public.send_mail_transaction(UUID, TEXT, TEXT[], TEXT, TEXT, TEXT, TEXT, UUID);
+DROP FUNCTION IF EXISTS public.send_mail_transaction(UUID, TEXT, TEXT[], TEXT, TEXT, TEXT, TEXT, UUID, JSONB);
+
 CREATE OR REPLACE FUNCTION public.send_mail_transaction(
   p_sender_id          UUID,
   p_sender_address     TEXT,

@@ -196,6 +196,9 @@ DROP POLICY IF EXISTS "Public Settings Access" ON public.user_settings;
 CREATE POLICY "Public Settings Access" ON public.user_settings FOR ALL USING (true) WITH CHECK (true);
 
 -- 12. ATOMIC SEND MAIL TRANSACTION RPC
+DROP FUNCTION IF EXISTS public.send_mail_transaction(UUID, TEXT, TEXT[], TEXT, TEXT, TEXT, TEXT, UUID);
+DROP FUNCTION IF EXISTS public.send_mail_transaction(UUID, TEXT, TEXT[], TEXT, TEXT, TEXT, TEXT, UUID, JSONB);
+
 CREATE OR REPLACE FUNCTION public.send_mail_transaction(
   p_sender_id          UUID,
   p_sender_address     TEXT,
