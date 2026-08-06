@@ -504,6 +504,34 @@ export const api = {
 
       const userEmail = userProfile?.primary_address || '';
 
+      // Collect all sender addresses to batch-fetch avatar URLs from profiles table
+      const senderAddresses = Array.from(
+        new Set(
+          data
+            .map((item: any) => {
+              const msg: any = Array.isArray(item.messages) ? item.messages[0] : item.messages;
+              return msg?.sender_address?.toLowerCase()?.trim();
+            })
+            .filter(Boolean)
+        )
+      );
+
+      const avatarMap = new Map<string, string>();
+      if (senderAddresses.length > 0) {
+        const { data: senderProfiles } = await supabase
+          .from('profiles')
+          .select('primary_address, avatar_url')
+          .in('primary_address', senderAddresses);
+
+        if (senderProfiles) {
+          senderProfiles.forEach((p: any) => {
+            if (p.avatar_url && p.primary_address) {
+              avatarMap.set(p.primary_address.toLowerCase().trim(), p.avatar_url);
+            }
+          });
+        }
+      }
+
       const seenStateIds = new Set<string>();
       const result: Message[] = [];
 
@@ -516,6 +544,7 @@ export const api = {
 
         const recipList: string[] = (msg.message_recipients || []).map((r: any) => r.recipient_address);
         const senderAddr = msg.sender_address || 'unknown@mexo.com';
+        const senderAvatar = avatarMap.get(senderAddr.toLowerCase().trim()) || undefined;
         const parsedAttachments = msg.attachments && Array.isArray(msg.attachments) ? msg.attachments : [];
 
         result.push({
@@ -523,6 +552,7 @@ export const api = {
           threadId: msg.thread_id || item.id,
           senderName: senderAddr.split('@')[0],
           senderEmail: senderAddr,
+          senderAvatar: senderAvatar,
           recipients: recipList.length > 0 ? recipList : [userEmail],
           subject: msg.subject || '(no subject)',
           bodyHtml: msg.body_html || '',
