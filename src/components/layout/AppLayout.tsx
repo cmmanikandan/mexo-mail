@@ -7,7 +7,6 @@ import { MexoToastContainer } from '../common/MexoToast';
 import { ContactFormModal } from '../contacts/ContactFormModal';
 import { AdvancedSearchModal } from '../mail/AdvancedSearchModal';
 import { KeyboardShortcutsModal } from '../mail/KeyboardShortcutsModal';
-import { ChangePasswordSuggestionModal } from '../auth/ChangePasswordSuggestionModal';
 import { InstallAppSuggestionModal } from '../common/InstallAppSuggestionModal';
 import { useUIStore } from '../../store/uiStore';
 import { useMailStore } from '../../store/mailStore';
@@ -26,31 +25,22 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   const { isCreateGroupOpen, setCreateGroupOpen, isCreateContactOpen, setCreateContactOpen, isAdvancedSearchOpen, setAdvancedSearchOpen, isKeyboardShortcutsOpen, setKeyboardShortcutsOpen } = useUIStore();
   const { openCompose } = useComposeStore();
   const { currentFolder, setCurrentFolder, lastUpdated } = useMailStore();
-  const { currentUser, isAuthenticated, isLoading: isAuthLoading, isDefaultPasswordUser } = useAuthStore();
+  const { currentUser, isAuthenticated, isLoading: isAuthLoading } = useAuthStore();
   const userEmail = currentUser?.email || 'manikandanprabhu1221@mexo.com';
 
   // Pop-up Suggestion Modals state
-  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isInstallAppModalOpen, setIsInstallAppModalOpen] = useState(false);
-
-  // Trigger Change Password modal only when auth initialization finished & user authenticated
-  useEffect(() => {
-    if (!isAuthLoading && isAuthenticated && isDefaultPasswordUser) {
-      const timer = setTimeout(() => setIsChangePasswordModalOpen(true), 600);
-      return () => clearTimeout(timer);
-    }
-  }, [isAuthLoading, isAuthenticated, isDefaultPasswordUser]);
 
   // Trigger Install App suggestion modal if not dismissed for current session
   useEffect(() => {
-    if (!isDefaultPasswordUser && !isChangePasswordModalOpen) {
+    if (!isAuthLoading && isAuthenticated) {
       const dismissed = sessionStorage.getItem('mexo_pwa_prompt_dismissed');
       if (!dismissed) {
         const timer = setTimeout(() => setIsInstallAppModalOpen(true), 1200);
         return () => clearTimeout(timer);
       }
     }
-  }, [isDefaultPasswordUser, isChangePasswordModalOpen]);
+  }, [isAuthLoading, isAuthenticated]);
 
   // 🔔 Tab Favicon badge with unread count
   const unreadCount = React.useMemo(() => {
@@ -130,11 +120,6 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
       <AdvancedSearchModal isOpen={isAdvancedSearchOpen} onClose={() => setAdvancedSearchOpen(false)} />
       <KeyboardShortcutsModal isOpen={isKeyboardShortcutsOpen} onClose={() => setKeyboardShortcutsOpen(false)} />
 
-      {/* Suggestion Pop-up Modals */}
-      <ChangePasswordSuggestionModal
-        isOpen={isChangePasswordModalOpen}
-        onClose={() => setIsChangePasswordModalOpen(false)}
-      />
       <InstallAppSuggestionModal
         isOpen={isInstallAppModalOpen}
         onClose={() => {

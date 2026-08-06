@@ -402,51 +402,57 @@ export const api = {
     try {
       console.log('[AUTH] Password update initiated');
 
-      // 1. Verify there is an active Supabase Auth session
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session;
+      // 1. Check for active Supabase Auth session — required for either update path
+      let { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData?.session?.user) {
+        const { data: refreshed } = await supabase.auth.refreshSession();
+        sessionData = refreshed as any;
+      }
 
-      if (!session?.user) {
-        // Try session refresh once
-        const { data: refreshData } = await supabase.auth.refreshSession();
-        if (!refreshData?.session?.user) {
-          console.error('[AUTH] Password update failed: No active session.');
-          return { success: false, error: 'SESSION_EXPIRED' };
+      if (!sessionData?.session?.user) {
+        console.error('[AUTH] No active Supabase Auth session for password update.');
+        return { success: false, error: 'SESSION_EXPIRED' };
+      }
+
+      console.log('[AUTH] Session active for user:', sessionData.session.user.id);
+
+      // 2a. Try SECURITY DEFINER RPC (updates auth.users.encrypted_password directly via bcrypt)
+      let rpcSucceeded = false;
+      try {
+        const { data: rpcResult, error: rpcError } = await supabase.rpc('update_user_password', {
+          p_new_password: newPassword,
+        });
+
+        if (!rpcError && (rpcResult as any)?.success === true) {
+          console.log('[AUTH] Password updated via SECURITY DEFINER RPC!');
+          rpcSucceeded = true;
+        } else {
+          console.warn('[AUTH] RPC attempt result:', rpcError?.message || (rpcResult as any)?.error);
         }
+      } catch (rpcEx) {
+        console.warn('[AUTH] RPC call threw exception:', rpcEx);
       }
 
-      console.log('[AUTH] Session confirmed — updating password via SECURITY DEFINER RPC');
-
-      // 2. Call the SECURITY DEFINER RPC to update auth.users.encrypted_password directly
-      // This works for ALL account types including admin-created accounts
-      const { data: rpcResult, error: rpcError } = await supabase.rpc('update_user_password', {
-        p_new_password: newPassword,
-      });
-
-      if (rpcError) {
-        console.error('[AUTH] RPC update_user_password error:', rpcError.message);
-        // Fallback to supabase.auth.updateUser if RPC not yet deployed
-        if (rpcError.message?.includes('does not exist') || rpcError.message?.includes('Could not find')) {
-          console.log('[AUTH] RPC not found, falling back to supabase.auth.updateUser');
-          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
-          if (updateError) {
-            console.error('[AUTH] Supabase Auth updateUser error:', updateError.message);
-            return { success: false, error: updateError.message };
-          }
-          console.log('[AUTH] Password updated via supabase.auth.updateUser fallback!');
-          return { success: true };
+      // 2b. Always also try supabase.auth.updateUser (works when JWT session is valid)
+      let authUpdateSucceeded = false;
+      try {
+        const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+        if (!updateError) {
+          console.log('[AUTH] Password updated via supabase.auth.updateUser!');
+          authUpdateSucceeded = true;
+        } else {
+          console.warn('[AUTH] supabase.auth.updateUser error:', updateError.message);
         }
-        return { success: false, error: rpcError.message };
+      } catch (updateEx) {
+        console.warn('[AUTH] supabase.auth.updateUser threw exception:', updateEx);
       }
 
-      const result = rpcResult as any;
-      if (!result?.success) {
-        console.error('[AUTH] RPC returned failure:', result?.error);
-        return { success: false, error: result?.error || 'Failed to update password.' };
+      if (rpcSucceeded || authUpdateSucceeded) {
+        console.log('[AUTH] Password change SUCCESS — RPC:', rpcSucceeded, '| Auth.updateUser:', authUpdateSucceeded);
+        return { success: true };
       }
 
-      console.log('[AUTH] Password updated successfully via RPC!');
-      return { success: true };
+      return { success: false, error: 'Unable to update password. Please try signing out and back in, then try again.' };
     } catch (err: any) {
       console.error('[AUTH] Password update exception:', err);
       return { success: false, error: err?.message || 'Failed to update password.' };
