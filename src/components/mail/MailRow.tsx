@@ -117,8 +117,9 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
     try {
       const d = new Date(isoString);
       const now = new Date();
+      const use12h = db.getSettings().timeFormat === '12';
       if (d.toDateString() === now.toDateString()) {
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: use12h });
       }
       return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
     } catch {

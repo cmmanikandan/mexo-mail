@@ -269,7 +269,7 @@ ${latestMsg.bodyHtml}`,
 
                   <div className="flex items-center space-x-2 flex-shrink-0">
                     <span className="text-[11px] text-app-muted font-medium">
-                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: db.getSettings().timeFormat === '12' })}
                     </span>
                     <button
                       onClick={(e) => {
