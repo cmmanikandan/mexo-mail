@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { MexoModal } from '../common/MexoModal';
 import { MexoButton } from '../common/MexoButton';
 import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
-import { ShieldAlert, Eye, EyeOff, CheckCircle2, Lock } from 'lucide-react';
+import { ShieldAlert, Eye, EyeOff, CheckCircle2, Lock, Check, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
@@ -17,12 +17,16 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
   onClose,
 }) => {
   const { addToast } = useUIStore();
-  const { clearDefaultPasswordFlag } = useAuthStore();
+  const { currentUser, clearDefaultPasswordFlag } = useAuthStore();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const isMatching = confirmPassword.length > 0 && newPassword === confirmPassword;
+  const isMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const isFormValid = newPassword.length >= 8 && isMatching;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -30,8 +34,8 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
       setError('Please enter a new password.');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters long.');
+    if (newPassword.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -43,7 +47,7 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
       setIsLoading(true);
       setError('');
 
-      const res = await api.updateUserPassword(newPassword);
+      const res = await api.updateUserPassword(newPassword, currentUser?.email, currentUser?.username);
       if (res.success) {
         addToast({ message: 'Password updated successfully! Your account is now secured.', type: 'success' });
         clearDefaultPasswordFlag();
@@ -127,10 +131,33 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
               }}
               placeholder="Re-enter new password"
               required
-              className="w-full pl-9 pr-10 py-2.5 rounded-xl border border-app-border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none focus:border-[#7C3AED]"
+              className={`w-full pl-9 pr-10 py-2.5 rounded-xl border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none transition-colors ${
+                isMatching
+                  ? 'border-emerald-500 focus:border-emerald-600'
+                  : isMismatch
+                  ? 'border-rose-500 focus:border-rose-600'
+                  : 'border-app-border focus:border-[#7C3AED]'
+              }`}
             />
             <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
           </div>
+
+          {/* Confirm Password Live Match Validator Feedback */}
+          {confirmPassword.length > 0 && (
+            <div className="mt-1.5 text-xs font-semibold flex items-center space-x-1.5">
+              {isMatching ? (
+                <div className="flex items-center text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <Check className="w-3.5 h-3.5 mr-1 text-emerald-500 flex-shrink-0" />
+                  <span>Passwords match</span>
+                </div>
+              ) : (
+                <div className="flex items-center text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800">
+                  <X className="w-3.5 h-3.5 mr-1 text-rose-500 flex-shrink-0" />
+                  <span>Passwords do not match</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Buttons */}
@@ -143,7 +170,13 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
             Remind Me Later
           </button>
 
-          <MexoButton type="submit" isLoading={isLoading} size="md" className="px-6 rounded-xl font-bold text-xs">
+          <MexoButton
+            type="submit"
+            isLoading={isLoading}
+            disabled={isLoading || (confirmPassword.length > 0 && !isMatching)}
+            size="md"
+            className="px-6 rounded-xl font-bold text-xs disabled:opacity-60 cursor-pointer"
+          >
             <CheckCircle2 className="w-4 h-4 mr-1.5 inline" />
             Update Password Now
           </MexoButton>

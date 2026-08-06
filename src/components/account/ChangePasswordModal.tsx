@@ -4,7 +4,8 @@ import { MexoButton } from '../common/MexoButton';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
 import { db } from '../../services/db';
-import { Lock, Eye, EyeOff, CheckCircle2, ShieldAlert } from 'lucide-react';
+import { api } from '../../services/api';
+import { Lock, Eye, EyeOff, CheckCircle2, ShieldAlert, Check, X } from 'lucide-react';
 
 export interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -33,6 +34,9 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const isMatching = confirmPassword.length > 0 && newPassword === confirmPassword;
+  const isMismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+
   const handleResetForm = () => {
     setCurrentPassword('');
     setNewPassword('');
@@ -45,7 +49,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     onClose();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -57,8 +61,8 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     }
 
     // Verification 2: New Password Length
-    if (newPassword.trim().length < 6) {
-      setError('New password must be at least 6 characters long.');
+    if (newPassword.trim().length < 8) {
+      setError('New password must be at least 8 characters long.');
       return;
     }
 
@@ -74,28 +78,34 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       return;
     }
 
-    setIsSubmitting(true);
+    try {
+      setIsSubmitting(true);
 
-    setTimeout(() => {
-      // Execute database update
-      db.changeUserPassword(currentUser.id, newPassword.trim());
+      const res = await api.updateUserPassword(newPassword.trim(), currentUser?.email, currentUser?.username);
 
-      // Update in Zustand authStore
-      updateCurrentUser({
-        password: newPassword.trim(),
-        requiresPasswordChange: false,
-        createdByAdmin: false,
-      });
+      if (res.success) {
+        db.changeUserPassword(currentUser.id, newPassword.trim());
+        updateCurrentUser({
+          password: newPassword.trim(),
+          requiresPasswordChange: false,
+          createdByAdmin: false,
+        });
 
+        addToast({
+          message: 'Your MEXO Account password was updated successfully!',
+          type: 'success',
+        });
+
+        if (onSuccess) onSuccess();
+        handleClose();
+      } else {
+        setError(res.error || 'Failed to update password.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Password update failed.');
+    } finally {
       setIsSubmitting(false);
-      addToast({
-        message: 'Your MEXO Account password was updated successfully!',
-        type: 'success',
-      });
-
-      if (onSuccess) onSuccess();
-      handleClose();
-    }, 400);
+    }
   };
 
   return (
@@ -192,9 +202,15 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Re-enter new password"
-              className="w-full px-3.5 py-2.5 rounded-xl border border-app-border bg-white dark:bg-slate-900 text-sm text-app-heading placeholder-app-muted focus:outline-none focus:border-app-primary pr-10"
+              className={`w-full px-3.5 py-2.5 rounded-xl border bg-white dark:bg-slate-900 text-sm text-app-heading placeholder-app-muted outline-none transition-colors pr-10 ${
+                isMatching
+                  ? 'border-emerald-500 focus:border-emerald-600'
+                  : isMismatch
+                  ? 'border-rose-500 focus:border-rose-600'
+                  : 'border-app-border focus:border-app-primary'
+              }`}
               required
-              minLength={6}
+              minLength={8}
             />
             <button
               type="button"
@@ -205,6 +221,23 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               {showConfirm ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
           </div>
+
+          {/* Confirm Password Live Match Validator Feedback */}
+          {confirmPassword.length > 0 && (
+            <div className="mt-1.5 text-xs font-semibold flex items-center space-x-1.5">
+              {isMatching ? (
+                <div className="flex items-center text-emerald-600 dark:text-emerald-400 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                  <Check className="w-3.5 h-3.5 mr-1 text-emerald-500 flex-shrink-0" />
+                  <span>Passwords match</span>
+                </div>
+              ) : (
+                <div className="flex items-center text-rose-600 dark:text-rose-400 font-bold bg-rose-50 dark:bg-rose-950/40 px-2.5 py-1 rounded-lg border border-rose-200 dark:border-rose-800">
+                  <X className="w-3.5 h-3.5 mr-1 text-rose-500 flex-shrink-0" />
+                  <span>Passwords do not match</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Form Actions */}
