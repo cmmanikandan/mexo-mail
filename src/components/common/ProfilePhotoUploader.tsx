@@ -4,7 +4,8 @@ import { MexoButton } from './MexoButton';
 import { MexoAvatar } from './MexoAvatar';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
-import { Camera, Trash2, Upload, AlertCircle, Check } from 'lucide-react';
+import { uploadFileToCloudinary } from '../../services/cloudinaryService';
+import { Camera, Trash2, Upload, AlertCircle, Check, Loader2 } from 'lucide-react';
 
 export interface ProfilePhotoUploaderProps {
   isOpen: boolean;
@@ -16,9 +17,11 @@ export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({ isOp
   const { addToast } = useUIStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   if (!isOpen) return null;
 
@@ -40,6 +43,7 @@ export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({ isOp
       return;
     }
 
+    setSelectedFile(file);
     const reader = new FileReader();
     reader.onload = () => {
       setPreviewSrc(reader.result as string);
@@ -47,12 +51,34 @@ export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({ isOp
     reader.readAsDataURL(file);
   };
 
-  const handleSavePhoto = () => {
-    if (!previewSrc) return;
-    const versionedUrl = `${previewSrc}#v=${Date.now()}`;
-    updateCurrentUser({ avatarUrl: versionedUrl });
-    addToast({ message: 'Profile photo updated successfully.', type: 'success' });
-    onClose();
+  const handleSavePhoto = async () => {
+    if (!selectedFile && !previewSrc) return;
+
+    setIsUploading(true);
+    setError('');
+
+    try {
+      if (selectedFile) {
+        const cloudinaryRes = await uploadFileToCloudinary(selectedFile);
+        updateCurrentUser({ avatarUrl: cloudinaryRes.secure_url });
+        addToast({ message: 'Profile photo uploaded to Cloudinary successfully!', type: 'success' });
+      } else if (previewSrc) {
+        updateCurrentUser({ avatarUrl: previewSrc });
+        addToast({ message: 'Profile photo updated successfully.', type: 'success' });
+      }
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to upload profile photo to Cloudinary:', err);
+      if (previewSrc) {
+        updateCurrentUser({ avatarUrl: previewSrc });
+        addToast({ message: 'Profile photo updated locally.', type: 'info' });
+        onClose();
+      } else {
+        setError('Failed to upload image to Cloudinary. Please try again.');
+      }
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleConfirmRemove = () => {
@@ -145,8 +171,13 @@ export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({ isOp
                 Cancel
               </MexoButton>
               {previewSrc && (
-                <MexoButton variant="primary" onClick={handleSavePhoto} leftIcon={<Check className="w-4 h-4" />}>
-                  Save Photo
+                <MexoButton
+                  variant="primary"
+                  onClick={handleSavePhoto}
+                  disabled={isUploading}
+                  leftIcon={isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                >
+                  {isUploading ? 'Uploading to Cloudinary...' : 'Save Photo'}
                 </MexoButton>
               )}
             </div>

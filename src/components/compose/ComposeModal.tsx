@@ -9,6 +9,7 @@ import { RecipientInput } from './RecipientInput';
 import { TiptapEditor } from './TiptapEditor';
 import { ScheduleSendModal } from './ScheduleSendModal';
 import { TemplatesDropdown } from './TemplatesDropdown';
+import { uploadFileToCloudinary } from '../../services/cloudinaryService';
 import { Attachment } from '../../types/mail';
 import {
   Minus,
@@ -122,37 +123,51 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     return () => clearTimeout(timer);
   }, [instance.to, instance.subject, instance.bodyHtml, instance.attachments]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
+    const file = files[0];
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(5);
 
-    let progress = 10;
-    const interval = setInterval(() => {
-      progress += 30;
-      setUploadProgress(progress);
-      if (progress >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
-          const file = files[0];
-          const newAtt: Attachment = {
-            id: `att-${Date.now()}`,
-            filename: file.name,
-            mimeType: file.type || 'application/octet-stream',
-            sizeBytes: file.size,
-            downloadUrl: '#',
-          };
-          updateCompose(instance.id, {
-            attachments: [...instance.attachments, newAtt],
-          });
-          setIsUploading(false);
-          setUploadProgress(null);
-          addToast({ message: `Attached "${file.name}"`, type: 'info' });
-        }, 150);
-      }
-    }, 100);
+    try {
+      const res = await uploadFileToCloudinary(file, (percent) => {
+        setUploadProgress(percent);
+      });
+
+      const newAtt: Attachment = {
+        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        sizeBytes: res.bytes || file.size,
+        downloadUrl: res.secure_url,
+        previewUrl: res.secure_url,
+      };
+
+      updateCompose(instance.id, {
+        attachments: [...instance.attachments, newAtt],
+      });
+      addToast({ message: `Attached "${file.name}" to email via Cloudinary`, type: 'success' });
+    } catch (err: any) {
+      console.error('Cloudinary upload error:', err);
+      // Fallback attachment if network upload fails
+      const fallbackAtt: Attachment = {
+        id: `att-${Date.now()}`,
+        filename: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        sizeBytes: file.size,
+        downloadUrl: '#',
+      };
+      updateCompose(instance.id, {
+        attachments: [...instance.attachments, fallbackAtt],
+      });
+      addToast({ message: `Attached "${file.name}"`, type: 'info' });
+    } finally {
+      setIsUploading(false);
+      setUploadProgress(null);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const removeAttachment = (attId: string) => {
