@@ -234,7 +234,8 @@ class MexoDatabase {
 
   getMessagesForUser(userEmail: string): Message[] {
     const clean = userEmail.toLowerCase().trim();
-    const cleanUsername = clean.split('@')[0];
+    const cleanUsername = clean.includes('@') ? clean.split('@')[0] : clean;
+    const fullEmail = clean.includes('@') ? clean : `${clean}@mexo.com`;
 
     const stored = this.loadMessagesFromStorage();
     if (stored.length > 0) {
@@ -244,12 +245,15 @@ class MexoDatabase {
     return this.cachedMessages.filter((m) => {
       const recip = m.userState?.recipientEmail?.toLowerCase().trim() || '';
       const sender = m.senderEmail?.toLowerCase().trim() || '';
-      return (
-        recip === clean ||
-        recip === cleanUsername ||
-        sender === clean ||
-        sender === cleanUsername
-      );
+
+      const isSender = sender === clean || sender === cleanUsername || sender === fullEmail;
+      const isRecipientState = recip === clean || recip === cleanUsername || recip === fullEmail;
+      const isRecipientList = (m.recipients || []).some((r) => {
+        const cleanR = r.toLowerCase().trim();
+        return cleanR === clean || cleanR === cleanUsername || cleanR === fullEmail;
+      });
+
+      return isSender || isRecipientState || isRecipientList;
     });
   }
 
@@ -352,11 +356,26 @@ class MexoDatabase {
   }
 
   async updateMessageState(stateId: string, updates: any): Promise<boolean> {
-    return api.updateMessageState(stateId, updates);
+    const idx = this.cachedMessages.findIndex((m) => m.id === stateId);
+    if (idx !== -1) {
+      this.cachedMessages[idx] = {
+        ...this.cachedMessages[idx],
+        userState: {
+          ...this.cachedMessages[idx].userState,
+          ...updates,
+        },
+      };
+      this.saveMessagesToStorage();
+    }
+    api.updateMessageState(stateId, updates).catch(() => {});
+    return true;
   }
 
   async deleteMessagePermanently(stateId: string): Promise<boolean> {
-    return api.deleteMessageState(stateId);
+    this.cachedMessages = this.cachedMessages.filter((m) => m.id !== stateId);
+    this.saveMessagesToStorage();
+    api.deleteMessageState(stateId).catch(() => {});
+    return true;
   }
 
   // --- DRAFTS ---
