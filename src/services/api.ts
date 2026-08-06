@@ -3,6 +3,7 @@ import { MexoUser, UserSession, SecurityEvent } from '../types/user';
 import { Message, Label, Draft, UserSignature } from '../types/mail';
 import { MexoGroup, GroupMember } from '../types/group';
 import { Contact } from '../types/contact';
+import { AuditLog, AdminMetrics } from '../types/admin';
 
 export interface ApiResponse<T> {
   data: T | null;
@@ -14,39 +15,241 @@ export const api = {
   // --- AUTH & PROFILE ---
   async getCurrentUserProfile(userId: string): Promise<MexoUser | null> {
     try {
-      const { data: user, error: uErr } = await supabase
-        .schema('mexo_identity')
-        .from('users')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (uErr || !user) return null;
-
-      const { data: profile } = await supabase
-        .schema('mexo_identity')
+      const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', userId)
         .maybeSingle();
 
+      if (error || !profile) return null;
+
       return {
-        id: user.id,
-        username: user.username,
-        email: user.primary_address,
-        firstName: profile?.first_name || '',
-        lastName: profile?.last_name || '',
-        avatarUrl: profile?.avatar_object_id || undefined,
-        role: user.status === 'ADMIN' ? 'system_admin' : 'user',
-        status: user.status === 'ACTIVE' ? 'active' : 'suspended',
-        storageUsedBytes: 0,
-        storageLimitBytes: 15 * 1024 * 1024 * 1024,
-        createdAt: user.created_at,
-        lastActiveAt: user.updated_at,
+        id: profile.id,
+        username: profile.username,
+        email: profile.primary_address,
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        avatarUrl: profile.avatar_url || undefined,
+        role: profile.role || 'user',
+        status: profile.status === 'suspended' ? 'suspended' : 'active',
+        storageUsedBytes: Number(profile.storage_used_bytes || 0),
+        storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+        createdAt: profile.created_at,
+        lastActiveAt: profile.updated_at,
         twoFactorEnabled: false,
       };
+    } catch (err) {
+      console.error('Error fetching user profile:', err);
+      return null;
+    }
+  },
+
+  async resolveUsernameToEmail(usernameOrEmail: string): Promise<string> {
+    const clean = usernameOrEmail.trim().toLowerCase();
+    if (clean.includes('@')) return clean;
+
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('primary_address')
+        .eq('username', clean)
+        .maybeSingle();
+
+      if (profile?.primary_address) {
+        return profile.primary_address;
+      }
+    } catch (err) {
+      console.warn('Username resolution error:', err);
+    }
+    return `${clean}@mexo.com`;
+  },
+
+  async getAllUsers(): Promise<MexoUser[]> {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error || !data) return [];
+
+      return data.map((profile: any) => ({
+        id: profile.id,
+        username: profile.username,
+        email: profile.primary_address,
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        avatarUrl: profile.avatar_url || undefined,
+        role: profile.role || 'user',
+        status: profile.status === 'suspended' ? 'suspended' : 'active',
+        storageUsedBytes: Number(profile.storage_used_bytes || 0),
+        storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+        createdAt: profile.created_at,
+        lastActiveAt: profile.updated_at,
+        twoFactorEnabled: false,
+      }));
+    } catch (err) {
+      console.error('Error fetching all users:', err);
+      return [];
+    }
+  },
+
+  async checkUsernameAvailable(username: string): Promise<{ available: boolean; reason?: string }> {
+    const clean = username.toLowerCase().trim();
+    if (!clean) return { available: false, reason: 'Username cannot be empty.' };
+    if (clean.length < 3) return { available: false, reason: 'Minimum length is 3 characters.' };
+    if (clean.length > 30) return { available: false, reason: 'Maximum length is 30 characters.' };
+
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', clean)
+        .maybeSingle();
+
+      if (data) {
+        return { available: false, reason: 'Already taken.' };
+      }
+      return { available: true };
+    } catch {
+      return { available: true };
+    }
+  },
+
+  async createUserAccount(userData: {
+    firstName: string;
+    lastName: string;
+    username: string;
+    password?: string;
+    recoveryEmail?: string;
+    dob?: string;
+    gender?: string;
+    avatarUrl?: string;
+    createdByAdmin?: boolean;
+    role?: 'system_admin' | 'admin' | 'user';
+  }): Promise<{ user: MexoUser | null; error: string | null }> {
+    try {
+      const cleanUsername = userData.username.toLowerCase().trim();
+      const primaryEmail = `${cleanUsername}@mexo.com`;
+      const pwd = userData.password || cleanUsername;
+
+      // 1. Create authentication user in Supabase Auth
+      const { data: authResult, error: authError } = await supabase.auth.signUp({
+        email: primaryEmail,
+        password: pwd,
+        options: {
+          data: {
+            username: cleanUsername,
+            first_name: userData.firstName,
+            last_name: userData.lastName,
+          },
+        },
+      });
+
+      let userId = authResult?.user?.id;
+
+      if (authError || !userId) {
+        // If auth user already exists, attempt to sign in to obtain user ID
+        const { data: signInResult, error: signInErr } = await supabase.auth.signInWithPassword({
+          email: primaryEmail,
+          password: pwd,
+        });
+
+        if (signInResult?.user?.id) {
+          userId = signInResult.user.id;
+        } else {
+          // Generate deterministic or UUID fallback if needed for profile
+          userId = authResult?.user?.id || crypto.randomUUID();
+        }
+      }
+
+      // 2. Create corresponding DB profile
+      const profileData = {
+        id: userId,
+        username: cleanUsername,
+        primary_address: primaryEmail,
+        first_name: userData.firstName,
+        last_name: userData.lastName,
+        avatar_url: userData.avatarUrl || null,
+        role: userData.role || 'user',
+        status: 'active',
+        storage_used_bytes: 0,
+        storage_limit_bytes: 15 * 1024 * 1024 * 1024,
+      };
+
+      const { data: insertedProfile, error: profError } = await supabase
+        .from('profiles')
+        .upsert(profileData)
+        .select()
+        .single();
+
+      if (profError) {
+        console.error('Error creating profile:', profError);
+        return { user: null, error: profError.message };
+      }
+
+      const createdUser: MexoUser = {
+        id: insertedProfile.id,
+        username: insertedProfile.username,
+        email: insertedProfile.primary_address,
+        firstName: insertedProfile.first_name || '',
+        lastName: insertedProfile.last_name || '',
+        avatarUrl: insertedProfile.avatar_url || undefined,
+        role: insertedProfile.role || 'user',
+        status: 'active',
+        storageUsedBytes: Number(insertedProfile.storage_used_bytes || 0),
+        storageLimitBytes: Number(insertedProfile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+        createdAt: insertedProfile.created_at,
+        lastActiveAt: insertedProfile.updated_at,
+        twoFactorEnabled: false,
+      };
+
+      await this.addAuditLog('admin@mexo.com', 'ACCOUNT_CREATED', primaryEmail, 'success');
+
+      return { user: createdUser, error: null };
+    } catch (err: any) {
+      console.error('createUserAccount failed:', err);
+      return { user: null, error: err?.message || 'Failed to create user account.' };
+    }
+  },
+
+  async updateUserProfile(userId: string, updates: Partial<MexoUser>): Promise<MexoUser | null> {
+    try {
+      const dbUpdates: any = {};
+      if (updates.firstName !== undefined) dbUpdates.first_name = updates.firstName;
+      if (updates.lastName !== undefined) dbUpdates.last_name = updates.lastName;
+      if (updates.avatarUrl !== undefined) dbUpdates.avatar_url = updates.avatarUrl;
+      if (updates.role !== undefined) dbUpdates.role = updates.role;
+      if (updates.status !== undefined) dbUpdates.status = updates.status;
+      if (updates.storageUsedBytes !== undefined) dbUpdates.storage_used_bytes = updates.storageUsedBytes;
+      dbUpdates.updated_at = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update(dbUpdates)
+        .eq('id', userId)
+        .select()
+        .single();
+
+      if (error || !data) return null;
+      return this.getCurrentUserProfile(userId);
     } catch {
       return null;
+    }
+  },
+
+  async deleteUserAccount(userId: string, email: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('id', userId);
+
+      if (error) return false;
+      await this.addAuditLog('admin@mexo.com', 'ACCOUNT_DELETED', email, 'warning');
+      return true;
+    } catch {
+      return false;
     }
   },
 
@@ -54,19 +257,20 @@ export const api = {
   async getMessagesForUser(userId: string): Promise<Message[]> {
     try {
       const { data, error } = await supabase
-        .schema('mexo_mail')
         .from('message_states')
         .select(`
+          id,
           message_id,
           folder,
           is_read,
-          read_at,
           is_archived,
           is_deleted,
           is_spam,
           is_important,
+          starred,
+          labels,
           updated_at,
-          message:messages (
+          messages!inner (
             id,
             thread_id,
             sender_user_id,
@@ -80,34 +284,139 @@ export const api = {
             sent_at
           )
         `)
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
 
       if (error || !data) return [];
 
-      return data.map((item: any) => ({
-        id: item.message.id,
-        threadId: item.message.thread_id,
-        senderName: item.message.sender_address.split('@')[0],
-        senderEmail: item.message.sender_address,
-        recipients: [],
-        subject: item.message.subject,
-        bodyHtml: item.message.body_html,
-        snippet: item.message.body_text?.substring(0, 100) || '',
-        createdAt: item.message.created_at || item.message.sent_at,
-        attachments: [],
-        userState: {
-          recipientEmail: item.message.sender_address,
-          isRead: item.is_read,
-          isStarred: false,
-          isArchived: item.is_archived,
-          isDeleted: item.is_deleted,
-          isSpam: item.is_spam,
-          isImportant: item.is_important,
-          labels: [],
-        },
-      }));
-    } catch {
+      return data.map((item: any) => {
+        const msg = item.messages;
+        return {
+          id: item.id,
+          threadId: msg.thread_id,
+          senderName: msg.sender_address.split('@')[0],
+          senderEmail: msg.sender_address,
+          recipients: [],
+          subject: msg.subject || '(no subject)',
+          bodyHtml: msg.body_html || '',
+          snippet: msg.body_text?.substring(0, 100) || '',
+          createdAt: msg.created_at || msg.sent_at,
+          attachments: [],
+          userState: {
+            recipientEmail: msg.sender_address,
+            isRead: item.is_read,
+            isStarred: Boolean(item.starred),
+            isArchived: item.is_archived,
+            isDeleted: item.is_deleted,
+            isSpam: item.is_spam,
+            isImportant: item.is_important,
+            labels: item.labels || [],
+          },
+        };
+      });
+    } catch (err) {
+      console.error('Error getting messages:', err);
       return [];
+    }
+  },
+
+  async sendMessage(params: {
+    senderUserId: string;
+    senderEmail: string;
+    senderName: string;
+    recipients: string[];
+    subject: string;
+    bodyHtml: string;
+    attachments?: any[];
+    clientMessageId?: string;
+  }): Promise<boolean> {
+    try {
+      const cleanSender = params.senderEmail.trim().toLowerCase();
+      const bodyText = params.bodyHtml.replace(/<[^>]*>?/gm, '');
+
+      // 1. Insert master message
+      const { data: msgData, error: msgErr } = await supabase
+        .from('messages')
+        .insert({
+          sender_user_id: params.senderUserId,
+          sender_address: cleanSender,
+          subject: params.subject || '(no subject)',
+          body_html: params.bodyHtml,
+          body_text: bodyText,
+          status: 'sent',
+        })
+        .select()
+        .single();
+
+      if (msgErr || !msgData) {
+        console.error('Error inserting message:', msgErr);
+        return false;
+      }
+
+      // 2. Insert message state for sender (sent folder)
+      await supabase.from('message_states').insert({
+        message_id: msgData.id,
+        user_id: params.senderUserId,
+        folder: 'sent',
+        is_read: true,
+      });
+
+      // 3. Resolve recipients & create inbox states for recipients
+      for (const recip of params.recipients) {
+        const recipEmail = await this.resolveUsernameToEmail(recip);
+        if (recipEmail !== cleanSender) {
+          const { data: recipProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('primary_address', recipEmail)
+            .maybeSingle();
+
+          if (recipProfile?.id) {
+            await supabase.from('message_recipients').insert({
+              message_id: msgData.id,
+              recipient_user_id: recipProfile.id,
+              recipient_address: recipEmail,
+              recipient_type: 'to',
+            });
+
+            await supabase.from('message_states').insert({
+              message_id: msgData.id,
+              user_id: recipProfile.id,
+              folder: 'inbox',
+              is_read: false,
+            });
+          }
+        }
+      }
+
+      return true;
+    } catch (err) {
+      console.error('Error sending message:', err);
+      return false;
+    }
+  },
+
+  async updateMessageState(stateId: string, updates: any): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('message_states')
+        .update(updates)
+        .eq('id', stateId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
+  async deleteMessageState(stateId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase
+        .from('message_states')
+        .delete()
+        .eq('id', stateId);
+      return !error;
+    } catch {
+      return false;
     }
   },
 
@@ -115,7 +424,6 @@ export const api = {
   async getDraftsForUser(userId: string): Promise<Draft[]> {
     try {
       const { data, error } = await supabase
-        .schema('mexo_mail')
         .from('drafts')
         .select('*')
         .eq('owner_user_id', userId);
@@ -124,9 +432,9 @@ export const api = {
 
       return data.map((d: any) => ({
         id: d.id,
-        to: [],
-        cc: [],
-        bcc: [],
+        to: d.to_recipients || [],
+        cc: d.cc_recipients || [],
+        bcc: d.bcc_recipients || [],
         subject: d.subject || '',
         bodyHtml: d.body_html || '',
         attachments: [],
@@ -137,14 +445,57 @@ export const api = {
     }
   },
 
+  async saveDraft(userId: string, draft: Partial<Draft>): Promise<Draft | null> {
+    try {
+      const draftData = {
+        owner_user_id: userId,
+        to_recipients: draft.to || [],
+        cc_recipients: draft.cc || [],
+        bcc_recipients: draft.bcc || [],
+        subject: draft.subject || '',
+        body_html: draft.bodyHtml || '',
+        last_saved_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase
+        .from('drafts')
+        .upsert(draftData)
+        .select()
+        .single();
+
+      if (error || !data) return null;
+      return {
+        id: data.id,
+        to: data.to_recipients || [],
+        cc: data.cc_recipients || [],
+        bcc: data.bcc_recipients || [],
+        subject: data.subject || '',
+        bodyHtml: data.body_html || '',
+        attachments: [],
+        lastSavedAt: data.last_saved_at,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  async deleteDraft(draftId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase.from('drafts').delete().eq('id', draftId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
   // --- CONTACTS ---
   async getContactsForUser(userId: string): Promise<Contact[]> {
     try {
       const { data, error } = await supabase
-        .schema('mexo_contacts')
         .from('contacts')
         .select('*')
-        .eq('owner_user_id', userId);
+        .eq('owner_user_id', userId)
+        .order('display_name', { ascending: true });
 
       if (error || !data) return [];
 
@@ -166,44 +517,67 @@ export const api = {
     }
   },
 
+  async createContact(userId: string, contactData: Omit<Contact, 'id' | 'createdAt'>): Promise<Contact | null> {
+    try {
+      const payload = {
+        owner_user_id: userId,
+        first_name: contactData.firstName,
+        last_name: contactData.lastName || '',
+        display_name: contactData.displayName || `${contactData.firstName} ${contactData.lastName || ''}`.trim(),
+        email: contactData.email,
+        phone: contactData.phone || null,
+        organization: contactData.organization || null,
+        job_title: contactData.jobTitle || null,
+        favorite: contactData.isFavorite || false,
+      };
+
+      const { data, error } = await supabase.from('contacts').insert(payload).select().single();
+      if (error || !data) return null;
+
+      return {
+        id: data.id,
+        firstName: data.first_name,
+        lastName: data.last_name || '',
+        displayName: data.display_name,
+        email: data.email,
+        phone: data.phone || undefined,
+        organization: data.organization || undefined,
+        jobTitle: data.job_title || undefined,
+        isFavorite: Boolean(data.favorite),
+        isFrequent: false,
+        createdAt: data.created_at,
+      };
+    } catch {
+      return null;
+    }
+  },
+
+  async deleteContact(contactId: string): Promise<boolean> {
+    try {
+      const { error } = await supabase.from('contacts').delete().eq('id', contactId);
+      return !error;
+    } catch {
+      return false;
+    }
+  },
+
   // --- GROUPS ---
   async getGroupsForUser(userId: string): Promise<MexoGroup[]> {
     try {
-      const { data, error } = await supabase
-        .schema('mexo_groups')
-        .from('group_members')
-        .select(`
-          role,
-          joined_at,
-          group:groups (
-            id,
-            name,
-            slug,
-            group_address,
-            description,
-            privacy,
-            send_policy,
-            member_visibility,
-            owner_user_id,
-            status,
-            created_at
-          )
-        `)
-        .eq('user_id', userId);
-
+      const { data, error } = await supabase.from('groups').select('*');
       if (error || !data) return [];
 
-      return data.map((gm: any) => ({
-        id: gm.group.id,
-        name: gm.group.name,
-        address: gm.group.group_address,
-        description: gm.group.description || '',
+      return data.map((g: any) => ({
+        id: g.id,
+        name: g.name,
+        address: g.group_address,
+        description: g.description || '',
         memberCount: 1,
-        privacy: gm.group.privacy?.toLowerCase() || 'private',
+        privacy: g.privacy?.toLowerCase() || 'private',
         postingPermission: 'members',
         viewMembersPermission: 'members',
         members: [],
-        createdAt: gm.group.created_at,
+        createdAt: g.created_at,
       }));
     } catch {
       return [];
@@ -214,7 +588,6 @@ export const api = {
   async getLabelsForUser(userId: string): Promise<Label[]> {
     try {
       const { data, error } = await supabase
-        .schema('mexo_mail')
         .from('labels')
         .select('*')
         .eq('owner_user_id', userId);
@@ -229,6 +602,107 @@ export const api = {
       }));
     } catch {
       return [];
+    }
+  },
+
+  async createLabel(userId: string, name: string, color: string): Promise<Label | null> {
+    try {
+      const { data, error } = await supabase
+        .from('labels')
+        .insert({ owner_user_id: userId, name, color })
+        .select()
+        .single();
+
+      if (error || !data) return null;
+      return { id: data.id, name: data.name, color: data.color, unreadCount: 0 };
+    } catch {
+      return null;
+    }
+  },
+
+  // --- AUDIT LOGS & ADMIN METRICS ---
+  async getAuditLogs(): Promise<AuditLog[]> {
+    try {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(100);
+
+      if (error || !data) return [];
+
+      return data.map((log: any) => ({
+        id: log.id,
+        timestamp: log.timestamp,
+        actorEmail: log.actor_email,
+        action: log.action,
+        target: log.target || '',
+        result: log.result || 'success',
+        ipAddress: log.ip_address || '127.0.0.1',
+      }));
+    } catch {
+      return [];
+    }
+  },
+
+  async addAuditLog(actorEmail: string, action: string, target: string, result: 'success' | 'failed' | 'warning' = 'success'): Promise<void> {
+    try {
+      await supabase.from('audit_logs').insert({
+        actor_email: actorEmail,
+        action,
+        target,
+        result,
+        ip_address: '127.0.0.1',
+      });
+    } catch (err) {
+      console.warn('Failed to add audit log:', err);
+    }
+  },
+
+  async getAdminMetrics(): Promise<AdminMetrics> {
+    try {
+      const { count: totalUsers } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true });
+
+      const { count: activeUsers } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'active');
+
+      const { count: totalMessages } = await supabase
+        .from('messages')
+        .select('*', { count: 'exact', head: true });
+
+      const { count: totalGroups } = await supabase
+        .from('groups')
+        .select('*', { count: 'exact', head: true });
+
+      return {
+        totalUsers: totalUsers || 0,
+        activeUsers: activeUsers || 0,
+        messagesToday: totalMessages || 0,
+        messagesThisMonth: (totalMessages || 0) * 4,
+        totalGroups: totalGroups || 0,
+        storageUsedBytes: 0,
+        storageTotalBytes: 500 * 1024 * 1024 * 1024,
+        failedDeliveries: 0,
+        spamReports: 0,
+        securityAlerts: 0,
+      };
+    } catch {
+      return {
+        totalUsers: 0,
+        activeUsers: 0,
+        messagesToday: 0,
+        messagesThisMonth: 0,
+        totalGroups: 0,
+        storageUsedBytes: 0,
+        storageTotalBytes: 500 * 1024 * 1024 * 1024,
+        failedDeliveries: 0,
+        spamReports: 0,
+        securityAlerts: 0,
+      };
     }
   },
 };

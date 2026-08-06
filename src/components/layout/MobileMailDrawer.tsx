@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useUIStore } from '../../store/uiStore';
 import { useMailStore, MailFolder } from '../../store/mailStore';
 import { useComposeStore } from '../../store/composeStore';
+import { useAuthStore } from '../../store/authStore';
 import { db } from '../../services/db';
 import {
   X,
@@ -35,16 +36,17 @@ export const MobileMailDrawer: React.FC = () => {
 
   const [isMoreExpanded, setIsMoreExpanded] = useState(false);
   const labels = db.getLabels();
-  const currentUser = db.getCurrentUser();
+  const { currentUser } = useAuthStore();
 
   const { unreadInboxCount, draftCount } = React.useMemo(() => {
-    const msgs = db.getMessagesForUser(currentUser.email);
+    const email = currentUser?.email || '';
+    const msgs = db.getMessagesForUser(email);
     const unread = msgs.filter(
       (m) => !m.userState.isRead && !m.userState.isArchived && !m.userState.isDeleted && !m.userState.isSpam
     ).length;
-    const drafts = db.getDraftsForUser(currentUser.email).length;
+    const drafts = db.getDraftsForUser(email).length;
     return { unreadInboxCount: unread, draftCount: drafts };
-  }, [currentUser.email, lastUpdated, labels]);
+  }, [currentUser?.email, lastUpdated, labels]);
 
   // Lock body scroll when mobile drawer is open
   useEffect(() => {

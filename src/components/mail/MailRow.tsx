@@ -53,17 +53,18 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
   const isStarred = message.userState.isStarred;
   const isImportant = message.userState.isImportant;
 
-  const isSentFolder = currentFolder === 'sent' || message.senderEmail.toLowerCase() === currentUser.email.toLowerCase();
+  const userEmail = currentUser?.email?.toLowerCase() || '';
+  const isSentFolder = currentFolder === 'sent' || message.senderEmail.toLowerCase() === userEmail;
   const isDraftFolder = currentFolder === 'drafts' || message.id.startsWith('drf-');
 
   // Profile photo resolution:
   const senderAvatar = React.useMemo(() => {
-    if (message.senderEmail.toLowerCase() === currentUser.email.toLowerCase()) {
-      return currentUser.avatarUrl || message.senderAvatar;
+    if (message.senderEmail.toLowerCase() === userEmail) {
+      return currentUser?.avatarUrl || message.senderAvatar;
     }
     const senderUser = db.getUserByEmail(message.senderEmail);
     return senderUser?.avatarUrl || message.senderAvatar;
-  }, [message.senderEmail, message.senderAvatar, currentUser]);
+  }, [message.senderEmail, message.senderAvatar, userEmail, currentUser?.avatarUrl]);
 
   // Recipient label display for sent emails
   const recipientName = React.useMemo(() => {
@@ -75,8 +76,8 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
   }, [message.recipients]);
 
   const displayName = isSentFolder ? `To: ${recipientName}` : message.senderName;
-  const avatarName = isSentFolder ? `${currentUser.firstName} ${currentUser.lastName}` : message.senderName;
-  const avatarSrc = isSentFolder ? currentUser.avatarUrl : senderAvatar;
+  const avatarName = isSentFolder ? `${currentUser?.firstName || ''} ${currentUser?.lastName || ''}` : message.senderName;
+  const avatarSrc = isSentFolder ? currentUser?.avatarUrl : senderAvatar;
 
   const handleRowClick = (e: React.MouseEvent) => {
     const targetTag = (e.target as HTMLElement).tagName.toLowerCase();

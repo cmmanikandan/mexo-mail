@@ -7,12 +7,12 @@ import { AccountChip } from '../../components/auth/AccountChip';
 import { MexoButton } from '../../components/common/MexoButton';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
-import { db } from '../../services/db';
+import { api } from '../../services/api';
 
 export const SignInPage: React.FC = () => {
   const navigate = useNavigate();
   const { signIn } = useAuthStore();
-  const { setMobileDrawerOpen, addToast } = useUIStore();
+  const { addToast } = useUIStore();
 
   const [step, setStep] = useState<1 | 2>(1);
   const [usernameInput, setUsernameInput] = useState('');
@@ -23,35 +23,27 @@ export const SignInPage: React.FC = () => {
 
   const handleStep1Next = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = usernameInput.trim().toLowerCase();
+    const clean = usernameInput.trim();
     if (!clean) {
-      setError('Enter a MEXO address or username');
+      setError('Enter a Register Number, username, or MEXO address');
       return;
     }
 
-    const fullEmail = clean.includes('@') ? clean : `${clean}@mexo.com`;
     setIsLoading(true);
-    let user = db.getUserByEmail(fullEmail);
-
-    if (!user) {
-      user = await db.getUserByEmailAsync(fullEmail);
-    }
-    setIsLoading(false);
-
-    if (!user) {
-      setError("Couldn't find your MEXO Account");
-      return;
-    }
-
-    setResolvedEmail(user.email);
     setError('');
-    setStep(2);
+
+    try {
+      const email = await api.resolveUsernameToEmail(clean);
+      setResolvedEmail(email);
+      setStep(2);
+    } catch {
+      setError("Couldn't find your MEXO Account");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const targetUser = resolvedEmail ? db.getUserByEmail(resolvedEmail) : undefined;
-  const targetUserName = targetUser ? `${targetUser.firstName} ${targetUser.lastName}`.trim() : undefined;
-
-  const handleStep2SignIn = (e: React.FormEvent) => {
+  const handleStep2SignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password) {
       setError('Enter your password');
@@ -61,20 +53,30 @@ export const SignInPage: React.FC = () => {
     setIsLoading(true);
     setError('');
 
-    setTimeout(() => {
-      const success = signIn(resolvedEmail, password);
-      setIsLoading(false);
+    try {
+      const success = await signIn(usernameInput, password);
       if (success) {
         useUIStore.getState().setMobileDrawerOpen(false);
-        const loggedUser = db.getUserByEmail(resolvedEmail);
-        if (loggedUser) {
-          useUIStore.getState().addToast({ message: `Signed in as ${loggedUser.firstName} (${loggedUser.email})`, type: 'success' });
+        const currentUser = useAuthStore.getState().currentUser;
+        if (currentUser) {
+          addToast({ message: `Signed in as ${currentUser.firstName} (${currentUser.email})`, type: 'success' });
+          if (currentUser.role === 'system_admin') {
+            navigate('/admin');
+          } else {
+            navigate('/mail/inbox');
+          }
+        } else {
+          navigate('/mail/inbox');
         }
-        navigate('/mail/inbox');
       } else {
-        setError('Wrong password. Try again or click "Forgot password" to reset it.');
+        const storeErr = useAuthStore.getState().error;
+        setError(storeErr || 'Wrong password or account unavailable. Try again.');
       }
-    }, 250);
+    } catch (err: any) {
+      setError(err?.message || 'Sign in failed. Try again.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -87,13 +89,13 @@ export const SignInPage: React.FC = () => {
               Sign in
             </h2>
             <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 font-medium">
-              Use your MEXO Account
+              Use your MEXO Register No, Username, or Email
             </p>
           </div>
 
           <div className="mt-7 space-y-2">
             <AuthTextField
-              label="MEXO address or username"
+              label="Register No / Username / Email"
               value={usernameInput}
               error={error}
               onChange={(e) => {
@@ -118,7 +120,6 @@ export const SignInPage: React.FC = () => {
             Not your computer? Use a private browsing window to sign in securely.
           </p>
 
-          {/* Bottom Actions Alignment Grid */}
           <div className="flex items-center justify-between pt-9">
             <Link
               to="/signup"
@@ -127,7 +128,7 @@ export const SignInPage: React.FC = () => {
               Create account
             </Link>
 
-            <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-xl font-bold text-sm">
+            <MexoButton type="submit" isLoading={isLoading} size="lg" className="px-8 h-12 rounded-xl font-bold text-sm">
               Next
             </MexoButton>
           </div>
@@ -145,8 +146,7 @@ export const SignInPage: React.FC = () => {
             <div className="mt-3">
               <AccountChip
                 email={resolvedEmail}
-                name={targetUserName}
-                avatarUrl={targetUser?.avatarUrl}
+                name={usernameInput}
                 onClickChange={() => {
                   setStep(1);
                   setPassword('');
@@ -178,7 +178,6 @@ export const SignInPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Bottom Actions Alignment Grid */}
           <div className="flex items-center justify-between pt-9">
             <button
               type="button"

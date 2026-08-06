@@ -1,28 +1,53 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { MexoAvatar } from '../../components/common/MexoAvatar';
 import { MexoModal } from '../../components/common/MexoModal';
-import { db } from '../../services/db';
+import { api } from '../../services/api';
 import { useUIStore } from '../../store/uiStore';
-import { HardDrive, Search, Edit3 } from 'lucide-react';
+import { HardDrive, Search, Edit3, RefreshCw } from 'lucide-react';
 import { MexoUser } from '../../types/user';
+import { AdminMetrics } from '../../types/admin';
 
 export const AdminStoragePage: React.FC = () => {
   const { addToast } = useUIStore();
-  const [users, setUsers] = useState<MexoUser[]>(db.getUsers());
+  const [users, setUsers] = useState<MexoUser[]>([]);
+  const [metrics, setMetrics] = useState<AdminMetrics>({
+    totalUsers: 0,
+    activeUsers: 0,
+    messagesToday: 0,
+    messagesThisMonth: 0,
+    totalGroups: 0,
+    storageUsedBytes: 0,
+    storageTotalBytes: 500 * 1024 * 1024 * 1024,
+    failedDeliveries: 0,
+    spamReports: 0,
+    securityAlerts: 0,
+  });
+  const [loading, setLoading] = useState(true);
   const [selectedUser, setSelectedUser] = useState<MexoUser | null>(null);
   const [newQuotaGb, setNewQuotaGb] = useState('15');
   const [searchTerm, setSearchTerm] = useState('');
 
-  React.useEffect(() => {
-    let isMounted = true;
-    db.syncCloudUsers().then((synced) => {
-      if (isMounted && synced) setUsers(synced);
-    });
-    return () => { isMounted = false; };
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [allUsers, liveMetrics] = await Promise.all([
+        api.getAllUsers(),
+        api.getAdminMetrics(),
+      ]);
+      setUsers(allUsers);
+      setMetrics(liveMetrics);
+    } catch (err) {
+      console.error('Failed to load storage data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
   }, []);
 
-  const metrics = db.getAdminMetrics();
   const totalCapacityBytes = 500 * 1024 * 1024 * 1024;
   const totalUsedGb = (metrics.storageUsedBytes / (1024 * 1024 * 1024)).toFixed(2);
   const usedPercent = Math.min(100, Math.round((metrics.storageUsedBytes / totalCapacityBytes) * 100));
@@ -35,12 +60,11 @@ export const AdminStoragePage: React.FC = () => {
     );
   });
 
-  const handleQuotaSave = () => {
+  const handleQuotaSave = async () => {
     if (selectedUser) {
       const bytes = parseFloat(newQuotaGb) * 1024 * 1024 * 1024;
-      db.updateUser(selectedUser.id, { storageLimitBytes: bytes });
-      db.addAuditLog('admin@mexo.com', 'QUOTA_CHANGED', selectedUser.email, 'success');
-      setUsers(db.getUsers());
+      await api.updateUserProfile(selectedUser.id, { storageLimitBytes: bytes });
+      await loadData();
       addToast({ message: `Storage quota updated for ${selectedUser.email}`, type: 'success' });
       setSelectedUser(null);
     }
@@ -50,14 +74,25 @@ export const AdminStoragePage: React.FC = () => {
     <AdminLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="pb-2 border-b border-app-border">
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center">
-            <HardDrive className="w-6 h-6 mr-2.5 text-[#7C3AED] dark:text-indigo-400" />
-            Storage Quotas & Allocation
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
-            Organization storage allocation, user mail capacity limits, and system volume analytics.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-app-border">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center">
+              <HardDrive className="w-6 h-6 mr-2.5 text-[#7C3AED] dark:text-indigo-400" />
+              Storage Quotas & Allocation
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
+              Organization storage allocation, user mail capacity limits, and system volume analytics.
+            </p>
+          </div>
+
+          <button
+            onClick={loadData}
+            disabled={loading}
+            className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center space-x-2 border border-indigo-200 cursor-pointer self-start md:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Storage</span>
+          </button>
         </div>
 
         {/* Global Storage Meter Card */}
@@ -142,7 +177,7 @@ export const AdminStoragePage: React.FC = () => {
                             setSelectedUser(u);
                             setNewQuotaGb((u.storageLimitBytes / (1024 * 1024 * 1024)).toString());
                           }}
-                          className="px-3.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-[#7C3AED] dark:text-indigo-300 hover:bg-indigo-100 font-bold text-xs transition-colors inline-flex items-center space-x-1.5 border border-indigo-200/50 dark:border-indigo-800/40"
+                          className="px-3.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/80 text-[#7C3AED] dark:text-indigo-300 hover:bg-indigo-100 font-bold text-xs inline-flex items-center space-x-1.5 border border-indigo-200/50 cursor-pointer"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                           <span>Change Quota</span>
@@ -184,7 +219,7 @@ export const AdminStoragePage: React.FC = () => {
             <div className="flex justify-end space-x-2 pt-2 border-t border-app-border">
               <button
                 onClick={() => setSelectedUser(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100"
               >
                 Cancel
               </button>

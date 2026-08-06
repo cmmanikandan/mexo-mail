@@ -1,19 +1,37 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminLayout } from '../../components/layout/AdminLayout';
 import { MexoBadge } from '../../components/common/MexoBadge';
-import { db } from '../../services/db';
-import { History, Search } from 'lucide-react';
+import { api } from '../../services/api';
+import { History, Search, RefreshCw } from 'lucide-react';
+import { AuditLog } from '../../types/admin';
 
 export const AdminAuditPage: React.FC = () => {
-  const auditLogs = db.getAuditLogs();
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [resultFilter, setResultFilter] = useState<string>('all');
+
+  const fetchLogs = async () => {
+    try {
+      setLoading(true);
+      const logs = await api.getAuditLogs();
+      setAuditLogs(logs);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLogs();
+  }, []);
 
   const filteredLogs = auditLogs.filter((log) => {
     const matchesSearch =
       log.actorEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.target.toLowerCase().includes(searchTerm.toLowerCase());
+      (log.target && log.target.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesResult = resultFilter === 'all' || log.result === resultFilter;
     return matchesSearch && matchesResult;
   });
@@ -22,14 +40,25 @@ export const AdminAuditPage: React.FC = () => {
     <AdminLayout>
       <div className="space-y-6">
         {/* Header */}
-        <div className="pb-2 border-b border-app-border">
-          <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center">
-            <History className="w-6 h-6 mr-2.5 text-[#7C3AED] dark:text-indigo-400" />
-            Administrative Audit Log & Security Events
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
-            Immutable system event recording for governance, login attempts, user creations, and privilege updates.
-          </p>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-2 border-b border-app-border">
+          <div>
+            <h1 className="text-2xl font-extrabold text-slate-900 dark:text-slate-100 tracking-tight flex items-center">
+              <History className="w-6 h-6 mr-2.5 text-[#7C3AED] dark:text-indigo-400" />
+              Administrative Audit Log & Security Events
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 font-medium">
+              Immutable system event recording for governance, login attempts, user creations, and privilege updates.
+            </p>
+          </div>
+
+          <button
+            onClick={fetchLogs}
+            disabled={loading}
+            className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 font-extrabold text-xs flex items-center space-x-2 border border-indigo-200 cursor-pointer self-start md:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <span>Refresh Logs</span>
+          </button>
         </div>
 
         {/* Filter Bar */}

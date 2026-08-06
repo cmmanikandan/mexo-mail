@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Attachment } from '../types/mail';
 import { db } from '../services/db';
+import { useAuthStore } from './authStore';
 
 export interface ComposeInstance {
   id: string; // Unique compose window ID
@@ -104,18 +105,20 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
     get().updateCompose(id, { isSaving: true });
     
     const draftId = inst.draftId || `drf-${Date.now()}`;
-    const currentUser = db.getCurrentUser();
-    db.saveDraft({
-      id: draftId,
-      userEmail: currentUser.email,
-      to: inst.to,
-      cc: inst.cc,
-      bcc: inst.bcc,
-      subject: inst.subject,
-      bodyHtml: inst.bodyHtml,
-      attachments: inst.attachments,
-      lastSavedAt: new Date().toISOString(),
-    });
+    const currentUser = useAuthStore.getState().currentUser;
+    if (currentUser?.id) {
+      db.saveDraft(currentUser.id, {
+        id: draftId,
+        userEmail: currentUser.email,
+        to: inst.to,
+        cc: inst.cc,
+        bcc: inst.bcc,
+        subject: inst.subject,
+        bodyHtml: inst.bodyHtml,
+        attachments: inst.attachments,
+        lastSavedAt: new Date().toISOString(),
+      });
+    }
 
     setTimeout(() => {
       get().updateCompose(id, {

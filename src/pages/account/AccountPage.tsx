@@ -8,13 +8,11 @@ import { useUIStore } from '../../store/uiStore';
 import { db } from '../../services/db';
 import { MexoAvatar } from '../../components/common/MexoAvatar';
 import { MexoButton } from '../../components/common/MexoButton';
-import { AppHeader } from '../../components/layout/AppHeader';
 import { ComposeContainer } from '../../components/compose/ComposeModal';
 import { MexoToastContainer } from '../../components/common/MexoToast';
 import { ChangePasswordModal } from '../../components/account/ChangePasswordModal';
 import { PasswordChangeSuggestionBanner } from '../../components/account/PasswordChangeSuggestionBanner';
 import {
-  Shield,
   Monitor,
   KeyRound,
   Grid,
@@ -27,7 +25,6 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 
-// ─── Mobile Account Home ───────────────────────────────────────────────────────
 const MobileAccountHome: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuthStore();
@@ -53,7 +50,6 @@ const MobileAccountHome: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F6F8FC] dark:bg-[#0D1117] font-sans text-slate-900 dark:text-slate-100">
-      {/* Mobile Top Bar */}
       <div className="sticky top-0 z-30 bg-white dark:bg-slate-900 border-b border-app-border shadow-sm select-none">
         <div
           onClick={handleBack}
@@ -71,28 +67,26 @@ const MobileAccountHome: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto pb-8">
-        {/* Security Password Suggestion Banner */}
         <div className="px-4 pt-4">
           <PasswordChangeSuggestionBanner />
         </div>
 
-        {/* Identity Header */}
         <div className="flex flex-col items-center text-center px-6 pt-6 pb-6">
           <div
             className="relative group cursor-pointer mb-4"
             onClick={() => navigate('/account/personal-info')}
           >
             <MexoAvatar
-              name={`${currentUser.firstName} ${currentUser.lastName}`}
-              src={currentUser.avatarUrl}
+              name={`${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`}
+              src={currentUser?.avatarUrl}
               size="xl"
               className="w-20 h-20 text-2xl shadow-mexo-md border-2 border-white dark:border-slate-700"
             />
           </div>
           <h2 className="text-xl font-extrabold text-app-heading leading-tight">
-            {currentUser.firstName} {currentUser.lastName}
+            {currentUser?.firstName} {currentUser?.lastName}
           </h2>
-          <p className="text-sm text-app-primary font-mono mt-1 truncate max-w-full">{currentUser.email}</p>
+          <p className="text-sm text-app-primary font-mono mt-1 truncate max-w-full">{currentUser?.email}</p>
           <div className="flex items-center mt-2 text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
             <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
             MEXO Account
@@ -107,7 +101,6 @@ const MobileAccountHome: React.FC = () => {
           </MexoButton>
         </div>
 
-        {/* Grouped Navigation Cards */}
         <div className="px-4 space-y-5">
           {groups.map((group) => (
             <div key={group.label}>
@@ -143,29 +136,26 @@ const MobileAccountHome: React.FC = () => {
   );
 };
 
-// ─── Desktop Account Home (two-column) ────────────────────────────────────────
 const DesktopAccountOverview: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuthStore();
 
   return (
     <div className="space-y-6">
-      {/* Security Password Suggestion Banner */}
       <PasswordChangeSuggestionBanner />
 
-      {/* Identity card */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-app-border p-6 shadow-mexo-sm flex items-center gap-5">
         <MexoAvatar
-          name={`${currentUser.firstName} ${currentUser.lastName}`}
-          src={currentUser.avatarUrl}
+          name={`${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`}
+          src={currentUser?.avatarUrl}
           size="xl"
           className="w-20 h-20 text-2xl shadow-mexo-md"
         />
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-extrabold text-app-heading">
-            {currentUser.firstName} {currentUser.lastName}
+            {currentUser?.firstName} {currentUser?.lastName}
           </h2>
-          <p className="text-sm font-mono text-app-primary mt-0.5 truncate">{currentUser.email}</p>
+          <p className="text-sm font-mono text-app-primary mt-0.5 truncate">{currentUser?.email}</p>
           <div className="flex items-center mt-2 text-xs text-emerald-600 font-semibold">
             <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> MEXO Account · Active
           </div>
@@ -175,7 +165,6 @@ const DesktopAccountOverview: React.FC = () => {
         </MexoButton>
       </div>
 
-      {/* Quick nav grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {ACCOUNT_ITEMS.map((item) => (
           <button
@@ -198,7 +187,6 @@ const DesktopAccountOverview: React.FC = () => {
   );
 };
 
-// Security Subview Component
 const SecurityView: React.FC = () => {
   const { currentUser } = useAuthStore();
   const [isChangeModalOpen, setIsChangeModalOpen] = useState(false);
@@ -219,14 +207,14 @@ const SecurityView: React.FC = () => {
             <div>
               <h4 className="font-bold text-app-heading flex items-center">
                 Password
-                {(currentUser.requiresPasswordChange || currentUser.createdByAdmin) && (
+                {(currentUser?.requiresPasswordChange || currentUser?.createdByAdmin) && (
                   <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
                     Update Recommended
                   </span>
                 )}
               </h4>
               <p className="text-[11px] text-app-muted mt-0.5">
-                {currentUser.requiresPasswordChange || currentUser.createdByAdmin
+                {currentUser?.requiresPasswordChange || currentUser?.createdByAdmin
                   ? 'Temporary admin-assigned password in use'
                   : 'Protected by MEXO Account identity'}
               </p>
@@ -241,15 +229,8 @@ const SecurityView: React.FC = () => {
               <p className="text-[11px] text-app-muted mt-0.5">Extra authentication security layer.</p>
             </div>
             <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex-shrink-0">
-              {currentUser.twoFactorEnabled ? 'On' : 'Off'}
+              {currentUser?.twoFactorEnabled ? 'On' : 'Off'}
             </span>
-          </div>
-          <div className="pt-4 border-t border-app-border">
-            <h4 className="font-bold text-app-heading mb-2">Security Audit Log</h4>
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 flex items-center space-x-2 text-xs text-app-muted">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-              <span>No security incidents detected. Account status is optimal.</span>
-            </div>
           </div>
         </div>
       </div>
@@ -262,7 +243,6 @@ const SecurityView: React.FC = () => {
   );
 };
 
-// ─── AccountPage Router ────────────────────────────────────────────────────────
 export const AccountPage: React.FC = () => {
   const location = useLocation();
   const { currentUser } = useAuthStore();
@@ -279,13 +259,9 @@ export const AccountPage: React.FC = () => {
   const isPrivacy   = currentPath.includes('/privacy');
   const isStorage   = currentPath.includes('/storage');
 
-  // ── Mobile account home — dedicated fullscreen component ──
-  // Show on mobile when at root /account
-  // (desktop always goes through AccountSettingsLayout)
   if (isAccountRoot) {
     return (
       <>
-        {/* Desktop: two-column layout */}
         <div className="hidden md:block">
           <AccountSettingsLayout
             title="MEXO Account"
@@ -295,7 +271,6 @@ export const AccountPage: React.FC = () => {
             <DesktopAccountOverview />
           </AccountSettingsLayout>
         </div>
-        {/* Mobile: standalone account home */}
         <div className="md:hidden">
           <MobileAccountHome />
         </div>
@@ -303,7 +278,6 @@ export const AccountPage: React.FC = () => {
     );
   }
 
-  // ── Subpage title ──
   const getSubpageTitle = () => {
     if (isPersonal)  return 'Personal info';
     if (isSecurity)  return 'Security';
@@ -315,10 +289,8 @@ export const AccountPage: React.FC = () => {
     return 'MEXO Account';
   };
 
-  // ── Subpage content ──
   const renderContent = () => {
     if (isPersonal) return <PersonalInfoView />;
-
     if (isSecurity) return <SecurityView />;
 
     if (isSessions) return (
@@ -334,16 +306,6 @@ export const AccountPage: React.FC = () => {
             Sign Out Others
           </MexoButton>
         </div>
-        <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-50/50 dark:bg-emerald-950/20 flex items-center justify-between text-xs gap-3">
-          <div className="flex items-center space-x-3">
-            <Monitor className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-            <div>
-              <p className="font-bold text-app-heading">Web Browser (Current Session)</p>
-              <p className="text-[11px] text-app-muted">Last active: Just now</p>
-            </div>
-          </div>
-          <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 flex-shrink-0">Active</span>
-        </div>
       </div>
     );
 
@@ -353,12 +315,11 @@ export const AccountPage: React.FC = () => {
           <h2 className="text-lg font-extrabold text-app-heading flex items-center">
             <KeyRound className="w-5 h-5 text-amber-500 mr-2" /> Account Recovery
           </h2>
-          <p className="text-xs text-app-body mt-1">Methods to recover access if you lose credentials.</p>
         </div>
         <div className="p-4 rounded-xl border border-app-border flex items-center justify-between text-xs gap-3">
           <div>
             <h4 className="font-bold text-app-heading">Recovery Email</h4>
-            <p className="text-[11px] text-app-muted mt-0.5">{currentUser.recoveryEmail || 'No recovery email set'}</p>
+            <p className="text-[11px] text-app-muted mt-0.5">{currentUser?.recoveryEmail || 'No recovery email set'}</p>
           </div>
           <MexoButton variant="outline" size="sm">Update</MexoButton>
         </div>
@@ -371,17 +332,6 @@ export const AccountPage: React.FC = () => {
           <h2 className="text-lg font-extrabold text-app-heading flex items-center">
             <Grid className="w-5 h-5 text-app-primary mr-2" /> Connected MEXO Apps
           </h2>
-          <p className="text-xs text-app-body mt-1">Applications authorized to access your MEXO identity.</p>
-        </div>
-        <div className="p-4 rounded-xl border border-app-border flex items-center justify-between text-xs gap-3">
-          <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="MEXO Mail" className="w-8 h-8 object-contain flex-shrink-0" />
-            <div>
-              <h4 className="font-bold text-app-heading">MEXO Mail</h4>
-              <p className="text-[11px] text-app-muted">Full Mailbox & Identity Access</p>
-            </div>
-          </div>
-          <span className="px-2.5 py-0.5 text-[11px] font-bold rounded-full bg-mexo-100 dark:bg-mexo-900 text-mexo-700 dark:text-mexo-300 flex-shrink-0">Authorized</span>
         </div>
       </div>
     );
@@ -392,12 +342,11 @@ export const AccountPage: React.FC = () => {
           <h2 className="text-lg font-extrabold text-app-heading flex items-center">
             <Eye className="w-5 h-5 text-purple-600 mr-2" /> Account Privacy
           </h2>
-          <p className="text-xs text-app-body mt-1">Manage discovery and visibility of your identity.</p>
         </div>
         <div className="flex items-center justify-between p-4 rounded-xl border border-app-border text-xs gap-3">
           <div>
             <h4 className="font-bold text-app-heading">MEXO Contact Discovery</h4>
-            <p className="text-[11px] text-app-muted mt-0.5">Allow other MEXO users to find you via address ({currentUser.email}).</p>
+            <p className="text-[11px] text-app-muted mt-0.5">Allow other MEXO users to find you via address ({currentUser?.email}).</p>
           </div>
           <input type="checkbox" defaultChecked className="w-4 h-4 text-app-primary rounded flex-shrink-0" />
         </div>
@@ -405,7 +354,7 @@ export const AccountPage: React.FC = () => {
     );
 
     if (isStorage) {
-      const storageInfo = db.getStorageForUser(currentUser.email);
+      const storageInfo = db.getStorageForUser(currentUser?.email || '');
       const limitGB = (storageInfo.limitBytes / (1024 * 1024 * 1024)).toFixed(0);
       const freeGB = ((storageInfo.limitBytes - storageInfo.usedBytes) / (1024 * 1024 * 1024)).toFixed(1);
 
@@ -415,7 +364,6 @@ export const AccountPage: React.FC = () => {
             <h2 className="text-lg font-extrabold text-app-heading flex items-center">
               <HardDrive className="w-5 h-5 text-sky-600 mr-2" /> Data & Storage
             </h2>
-            <p className="text-xs text-app-body mt-1">Storage usage calculated from your active messages, drafts, and attachments.</p>
           </div>
 
           <div className="p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-app-border space-y-4 text-xs">
@@ -429,23 +377,13 @@ export const AccountPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Storage Progress Bar Track */}
             <div className="w-full h-3 rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden p-0.5 shadow-inner">
               <div
                 className="h-full rounded-full bg-gradient-to-r from-[#0878e8] via-[#0668cc] to-[#0052b3] shadow-md transition-all duration-500"
                 style={{ width: `${Math.max(storageInfo.percent, 3)}%` }}
               />
             </div>
-
-            <div className="flex items-center justify-between pt-1 text-[11px] text-app-muted">
-              <span>Mail & Attachments: <strong className="text-slate-800 dark:text-slate-200">{storageInfo.usedFormatted}</strong></span>
-              <span>Available Free Space: <strong className="text-emerald-600 dark:text-emerald-400">{freeGB} GB</strong></span>
-            </div>
           </div>
-
-          <MexoButton onClick={() => addToast({ message: 'Account data export requested.', type: 'info' })} variant="outline" size="sm">
-            <Download className="w-3.5 h-3.5 mr-1.5" /> Download Data Archive
-          </MexoButton>
         </div>
       );
     };

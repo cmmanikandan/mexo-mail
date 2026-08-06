@@ -4,6 +4,7 @@ import { MexoInput } from '../common/MexoInput';
 import { MexoButton } from '../common/MexoButton';
 import { Label } from '../../types/mail';
 import { db } from '../../services/db';
+import { useAuthStore } from '../../store/authStore';
 import { Tag, Check, AlertCircle } from 'lucide-react';
 
 export interface CreateLabelModalProps {
@@ -93,7 +94,8 @@ export const CreateLabelModal: React.FC<CreateLabelModalProps> = ({
         color,
       });
     } else {
-      db.createLabel(cleanName, color, parentLabelId || undefined);
+      const activeUserId = useAuthStore.getState().currentUser?.id || 'system-user';
+      db.createLabel(activeUserId, cleanName, color);
     }
 
     onSaveSuccess?.();

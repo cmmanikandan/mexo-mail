@@ -19,11 +19,11 @@ import { HelpPage } from './pages/support/HelpPage';
 import { PrivacyPage } from './pages/support/PrivacyPage';
 import { TermsPage } from './pages/support/TermsPage';
 import { useAuthStore } from './store/authStore';
-import { db } from './services/db';
 import { SplashScreen } from './components/common/SplashScreen';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
+  if (isLoading) return null;
   if (!isAuthenticated) {
     return <Navigate to="/signin" replace />;
   }
@@ -31,14 +31,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 };
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isAuthenticated } = useAuthStore();
-  if (!isAuthenticated || currentUser.role !== 'system_admin') {
+  const { currentUser, isAuthenticated, isLoading } = useAuthStore();
+  if (isLoading) return null;
+  if (!isAuthenticated || currentUser?.role !== 'system_admin') {
     return <Navigate to="/mail/inbox" replace />;
   }
   return <>{children}</>;
 };
 
-/** Sets the browser tab title for non-mail pages based on the route. */
 const RoutePageTitle: React.FC = () => {
   const location = useLocation();
 
@@ -65,13 +65,11 @@ const RoutePageTitle: React.FC = () => {
       '/admin/audit': `Audit Logs – ${APP}`,
     };
 
-    // Check exact matches first
     if (titleMap[path]) {
       document.title = titleMap[path];
       return;
     }
 
-    // Match prefix patterns
     if (path.startsWith('/settings')) {
       const section = path.split('/')[2];
       document.title = `${section ? section.charAt(0).toUpperCase() + section.slice(1) : 'Settings'} – ${APP}`;
@@ -88,15 +86,11 @@ const RoutePageTitle: React.FC = () => {
     }
 
     if (path.startsWith('/mail/thread/')) {
-      // ThreadView title — set a placeholder; ThreadView component will override
       document.title = `Mail – ${APP}`;
       return;
     }
 
-    // /mail/:folder handled by usePageTitle in AppLayout — don't override here
     if (path.startsWith('/mail/')) return;
-
-    // Default fallback
     document.title = APP;
   }, [location]);
 
@@ -104,7 +98,8 @@ const RoutePageTitle: React.FC = () => {
 };
 
 const RootRoute: React.FC = () => {
-  const { isAuthenticated } = useAuthStore();
+  const { isAuthenticated, isLoading } = useAuthStore();
+  if (isLoading) return null;
   if (isAuthenticated) {
     return <Navigate to="/mail/inbox" replace />;
   }
@@ -116,37 +111,28 @@ export const AppContent: React.FC = () => {
     <>
       <RoutePageTitle />
       <Routes>
-        {/* Landing Page for unauthenticated users, direct Inbox for authenticated users */}
         <Route path="/" element={<RootRoute />} />
-
-        {/* Auth Routes */}
         <Route path="/login" element={<Navigate to="/signin" replace />} />
         <Route path="/signin" element={<SignInPage />} />
         <Route path="/signup" element={<SignUpPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
 
-        {/* Public Support & Legal Routes */}
         <Route path="/help" element={<HelpPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="/terms" element={<TermsPage />} />
 
-        {/* Mail Routes */}
         <Route path="/mail" element={<Navigate to="/mail/inbox" replace />} />
         <Route path="/mail/:folder" element={<ProtectedRoute><MailFolderPage /></ProtectedRoute>} />
         <Route path="/mail/thread/:id" element={<ProtectedRoute><ThreadDetailPage /></ProtectedRoute>} />
 
-        {/* Contacts Route */}
         <Route path="/contacts" element={<ProtectedRoute><ContactsPage /></ProtectedRoute>} />
 
-        {/* Settings Routes */}
         <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
         <Route path="/settings/*" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
 
-        {/* Account Routes */}
         <Route path="/account" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
         <Route path="/account/*" element={<ProtectedRoute><AccountPage /></ProtectedRoute>} />
 
-        {/* Admin Routes */}
         <Route path="/admin" element={<AdminRoute><AdminDashboardPage /></AdminRoute>} />
         <Route path="/admin/users" element={<AdminRoute><AdminUsersPage /></AdminRoute>} />
         <Route path="/admin/mail-policies" element={<AdminRoute><AdminMailPoliciesPage /></AdminRoute>} />
@@ -154,7 +140,6 @@ export const AppContent: React.FC = () => {
         <Route path="/admin/security" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
         <Route path="/admin/audit" element={<AdminRoute><AdminAuditPage /></AdminRoute>} />
 
-        {/* Default Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
@@ -165,39 +150,18 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const [progress, setProgress] = useState(15);
+  const { initializeAuth } = useAuthStore();
 
   useEffect(() => {
     let isMounted = true;
 
-    // Stage 1: Auth check (120ms)
-    const t1 = setTimeout(() => {
-      if (isMounted) setProgress(35);
-    }, 120);
+    // Trigger Cloud Auth Initialization
+    initializeAuth();
 
-    // Stage 2: Account & profile data check (280ms)
-    const t2 = setTimeout(() => {
-      if (isMounted) {
-        try {
-          const user = db.getCurrentUser();
-          if (user) db.sendWelcomeEmail(user);
-        } catch (e) {
-          console.error(e);
-        }
-        setProgress(68);
-      }
-    }, 280);
-
-    // Stage 3: Initializing mailbox (450ms)
-    const t3 = setTimeout(() => {
-      if (isMounted) setProgress(88);
-    }, 450);
-
-    // Stage 4: Preparing route & data (600ms)
-    const t4 = setTimeout(() => {
-      if (isMounted) setProgress(95);
-    }, 600);
-
-    // Stage 5: App ready (750ms) -> reach 100% -> fade out -> unmount
+    const t1 = setTimeout(() => { if (isMounted) setProgress(35); }, 120);
+    const t2 = setTimeout(() => { if (isMounted) setProgress(68); }, 280);
+    const t3 = setTimeout(() => { if (isMounted) setProgress(88); }, 450);
+    const t4 = setTimeout(() => { if (isMounted) setProgress(95); }, 600);
     const t5 = setTimeout(() => {
       if (isMounted) {
         setProgress(100);
@@ -212,17 +176,6 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       }
     }, 750);
 
-    // Maximum safety fallback (3s max)
-    const safetyTimer = setTimeout(() => {
-      if (isMounted && isInitializing) {
-        setProgress(100);
-        setTimeout(() => {
-          setIsFadingOut(true);
-          setTimeout(() => setIsInitializing(false), 300);
-        }, 100);
-      }
-    }, 3000);
-
     return () => {
       isMounted = false;
       clearTimeout(t1);
@@ -230,9 +183,8 @@ const AppBootstrap: React.FC<{ children: React.ReactNode }> = ({ children }) => 
       clearTimeout(t3);
       clearTimeout(t4);
       clearTimeout(t5);
-      clearTimeout(safetyTimer);
     };
-  }, []);
+  }, [initializeAuth]);
 
   return (
     <>

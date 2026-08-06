@@ -7,6 +7,7 @@ import { SearchFilterChips } from '../../components/mail/SearchFilterChips';
 import { MobileSearchPage } from '../../components/mail/MobileSearchPage';
 import { useMailStore, MailFolder } from '../../store/mailStore';
 import { db } from '../../services/db';
+import { useAuthStore } from '../../store/authStore';
 import { filterMessagesByQuery } from '../../utils/SearchQueryParser';
 import { Message, Thread } from '../../types/mail';
 
@@ -24,17 +25,18 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
 
   // Reactively recompute filtered messages on any state change or action (lastUpdated)
   const filteredMessages: Message[] = React.useMemo(() => {
-    const currentUser = db.getCurrentUser();
-    const messages = db.getMessagesForUser(currentUser.email);
+    const { currentUser } = useAuthStore.getState();
+    const userEmail = currentUser?.email || 'user@mexo.com';
+    const messages = db.getMessagesForUser(userEmail);
     const labels = db.getLabels();
 
     if (activeFolder === 'drafts') {
-      const userDrafts = db.getDraftsForUser(currentUser.email);
+      const userDrafts = db.getDraftsForUser(userEmail);
       return userDrafts.map((d) => ({
         id: d.id,
         threadId: `th-draft-${d.id}`,
-        senderName: currentUser.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : currentUser.email,
-        senderEmail: currentUser.email,
+        senderName: currentUser?.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : userEmail,
+        senderEmail: userEmail,
         recipients: d.to.length > 0 ? d.to : ['(No recipients)'],
         subject: d.subject || '(Draft)',
         snippet: d.bodyHtml ? d.bodyHtml.replace(/<[^>]*>?/gm, '').slice(0, 100) : '(Empty draft)',
@@ -42,7 +44,7 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
         attachments: d.attachments || [],
         createdAt: d.lastSavedAt || new Date().toISOString(),
         userState: {
-          recipientEmail: currentUser.email,
+          recipientEmail: userEmail,
           isRead: true,
           isStarred: false,
           isImportant: false,
@@ -66,12 +68,12 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
     const rawFiltered = messages.filter((msg) => {
       const st = msg.userState;
       const isSnoozedActive = st.snoozedUntil ? new Date(st.snoozedUntil).getTime() > now : false;
-      const cleanUserEmail = currentUser.email.toLowerCase();
+      const cleanUserEmail = userEmail.toLowerCase();
       const isSentByMeToOthersOnly =
         msg.senderEmail.toLowerCase() === cleanUserEmail &&
         !msg.recipients.some((r) => {
           const cleanR = r.toLowerCase().trim();
-          return cleanR === cleanUserEmail || cleanR === currentUser.username.toLowerCase();
+          return cleanR === cleanUserEmail || cleanR === (currentUser?.username || '').toLowerCase();
         });
 
       switch (activeFolder) {
@@ -129,8 +131,8 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
 export const ThreadDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const { lastUpdated } = useMailStore();
-  const currentUser = db.getCurrentUser();
-  const messages = db.getMessagesForUser(currentUser.email);
+  const { currentUser } = useAuthStore();
+  const messages = db.getMessagesForUser(currentUser?.email || '');
 
   const threadMessages = React.useMemo(() => {
     return messages.filter((m) => m.threadId === id);

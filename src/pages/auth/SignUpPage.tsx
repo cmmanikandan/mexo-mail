@@ -9,8 +9,8 @@ import { AvatarPicker } from '../../components/auth/AvatarPicker';
 import { MexoButton } from '../../components/common/MexoButton';
 import { MexoAvatar } from '../../components/common/MexoAvatar';
 import { useAuthStore } from '../../store/authStore';
-import { db } from '../../services/db';
-import { Check, X, ArrowRight, Calendar, UserCheck, ShieldCheck } from 'lucide-react';
+import { api } from '../../services/api';
+import { Check, X, ArrowRight, Calendar } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 const MONTHS = [
@@ -50,16 +50,15 @@ export const SignUpPage: React.FC = () => {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [recoveryEmail, setRecoveryEmail] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Username validation state
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState<{
     available?: boolean;
     reason?: string;
-    alternatives?: string[];
   }>({});
 
-  // Real-time availability checker effect
   useEffect(() => {
     if (!username.trim()) {
       setUsernameStatus({});
@@ -67,8 +66,8 @@ export const SignUpPage: React.FC = () => {
     }
 
     setIsCheckingUsername(true);
-    const timer = setTimeout(() => {
-      const result = db.checkUsernameAvailable(username);
+    const timer = setTimeout(async () => {
+      const result = await api.checkUsernameAvailable(username);
       setUsernameStatus(result);
       setIsCheckingUsername(false);
     }, 300);
@@ -92,20 +91,6 @@ export const SignUpPage: React.FC = () => {
     
     if (!dobMonth || !dobDay || !dobYear || !gender) {
       setError('Please fill in your date of birth and select your gender.');
-      return;
-    }
-
-    // Age check (Minimum 13 years old)
-    const birthDate = new Date(parseInt(dobYear), parseInt(dobMonth) - 1, parseInt(dobDay));
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const m = today.getMonth() - birthDate.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-
-    if (isNaN(age) || age < 13) {
-      setError('You must be at least 13 years old to create a MEXO Account.');
       return;
     }
 
@@ -148,22 +133,36 @@ export const SignUpPage: React.FC = () => {
     setStep(7);
   };
 
-  const handleCreateAccountFinal = (e: React.FormEvent) => {
+  const handleCreateAccountFinal = async (e: React.FormEvent) => {
     e.preventDefault();
-    const formattedDob = `${dobYear}-${dobMonth}-${dobDay.padStart(2, '0')}`;
-    
-    signUp({
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      username: username.trim().toLowerCase(),
-      dob: formattedDob,
-      gender: gender,
-      avatarUrl: avatarUrl || undefined,
-      recoveryEmail: recoveryEmail.trim() || undefined,
-    });
+    setIsSubmitting(true);
+    setError('');
 
-    confetti({ particleCount: 110, spread: 80, origin: { y: 0.6 } });
-    setStep(8);
+    try {
+      const formattedDob = `${dobYear}-${dobMonth}-${dobDay.padStart(2, '0')}`;
+      const user = await signUp({
+        firstName: firstName.trim(),
+        lastName: lastName.trim(),
+        username: username.trim().toLowerCase(),
+        password: password.trim(),
+        dob: formattedDob,
+        gender: gender,
+        avatarUrl: avatarUrl || undefined,
+        recoveryEmail: recoveryEmail.trim() || undefined,
+      });
+
+      if (user) {
+        confetti({ particleCount: 110, spread: 80, origin: { y: 0.6 } });
+        setStep(8);
+      } else {
+        const storeErr = useAuthStore.getState().error;
+        setError(storeErr || 'Failed to create account. Try again.');
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to create account.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const calculateProgress = () => {
@@ -241,33 +240,25 @@ export const SignUpPage: React.FC = () => {
           </div>
 
           <div className="mt-7 space-y-5">
-            {/* Birthday Section */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
                 Date of Birth
               </label>
               <div className="grid grid-cols-3 gap-2.5">
-                {/* Month */}
                 <div>
                   <select
                     value={dobMonth}
-                    onChange={(e) => {
-                      setDobMonth(e.target.value);
-                      if (error) setError('');
-                    }}
+                    onChange={(e) => setDobMonth(e.target.value)}
                     required
-                    className="w-full h-12 px-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium focus:ring-2 focus:ring-mexo-500 focus:border-mexo-500 transition-all"
+                    className="w-full h-12 px-3 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium focus:ring-2 focus:ring-mexo-500"
                   >
                     <option value="" disabled hidden>Month</option>
                     {MONTHS.map((m) => (
-                      <option key={m.value} value={m.value}>
-                        {m.label}
-                      </option>
+                      <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
                   </select>
                 </div>
 
-                {/* Day */}
                 <div>
                   <input
                     type="number"
@@ -275,16 +266,12 @@ export const SignUpPage: React.FC = () => {
                     max="31"
                     placeholder="Day"
                     value={dobDay}
-                    onChange={(e) => {
-                      setDobDay(e.target.value);
-                      if (error) setError('');
-                    }}
+                    onChange={(e) => setDobDay(e.target.value)}
                     required
-                    className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium focus:ring-2 focus:ring-mexo-500 focus:border-mexo-500 transition-all"
+                    className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium"
                   />
                 </div>
 
-                {/* Year */}
                 <div>
                   <input
                     type="number"
@@ -292,30 +279,21 @@ export const SignUpPage: React.FC = () => {
                     max={new Date().getFullYear()}
                     placeholder="Year"
                     value={dobYear}
-                    onChange={(e) => {
-                      setDobYear(e.target.value);
-                      if (error) setError('');
-                    }}
+                    onChange={(e) => setDobYear(e.target.value)}
                     required
-                    className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium focus:ring-2 focus:ring-mexo-500 focus:border-mexo-500 transition-all"
+                    className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Gender Section */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                Gender
-              </label>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Gender</label>
               <select
                 value={gender}
-                onChange={(e) => {
-                  setGender(e.target.value);
-                  if (error) setError('');
-                }}
+                onChange={(e) => setGender(e.target.value)}
                 required
-                className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium focus:ring-2 focus:ring-mexo-500 focus:border-mexo-500 transition-all"
+                className="w-full h-12 px-3.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-sm font-medium"
               >
                 <option value="" disabled hidden>Select Gender</option>
                 <option value="Female">Female</option>
@@ -325,17 +303,8 @@ export const SignUpPage: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between pt-9">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">
-              Next
-            </MexoButton>
+            <button type="button" onClick={() => setStep(1)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Next</MexoButton>
           </div>
         </form>
       )}
@@ -348,20 +317,19 @@ export const SignUpPage: React.FC = () => {
               Choose your MEXO address
             </h2>
             <p className="text-base text-slate-600 dark:text-slate-400 mt-2 font-normal">
-              This is how people will reach you on MEXO Mail.
+              Enter Register No or preferred username.
             </p>
           </div>
 
           <div className="mt-7 space-y-3">
             <MexoAddressInput
-              label="Choose your MEXO address"
+              label="Username or Register No"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
               autoFocus
             />
 
-            {/* Real-time Status Feedback */}
             {username.trim() && (
               <div className="text-xs pt-1">
                 {isCheckingUsername ? (
@@ -372,26 +340,9 @@ export const SignUpPage: React.FC = () => {
                     <span>✓ {username.toLowerCase()}@mexo.com is available</span>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <div className="flex items-center text-rose-600 dark:text-rose-400 font-semibold">
-                      <X className="w-4 h-4 mr-1" />
-                      <span>{usernameStatus.reason || 'That address is already taken.'}</span>
-                    </div>
-                    {usernameStatus.alternatives && usernameStatus.alternatives.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                        <span className="text-slate-500 font-medium">Available suggestions:</span>
-                        {usernameStatus.alternatives.map((alt) => (
-                          <button
-                            key={alt}
-                            type="button"
-                            onClick={() => setUsername(alt)}
-                            className="px-2.5 py-1 bg-mexo-50 dark:bg-mexo-950 text-mexo-700 dark:text-mexo-300 rounded-md font-bold hover:bg-mexo-100"
-                          >
-                            {alt}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                  <div className="flex items-center text-rose-600 dark:text-rose-400 font-semibold">
+                    <X className="w-4 h-4 mr-1" />
+                    <span>{usernameStatus.reason || 'That address is already taken.'}</span>
                   </div>
                 )}
               </div>
@@ -399,46 +350,26 @@ export const SignUpPage: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-between pt-9">
-            <button
-              type="button"
-              onClick={() => setStep(2)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <MexoButton
-              type="submit"
-              disabled={!usernameStatus.available}
-              size="lg"
-              className="px-8 h-12 rounded-lg font-semibold text-sm"
-            >
-              Next
-            </MexoButton>
+            <button type="button" onClick={() => setStep(2)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" disabled={!usernameStatus.available} size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Next</MexoButton>
           </div>
         </form>
       )}
 
-      {/* STEP 4: Password Creation & Strength Indicator */}
+      {/* STEP 4: Password Creation */}
       {step === 4 && (
         <form onSubmit={handleStep4Next} className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-normal text-slate-900 dark:text-slate-100 tracking-tight">
               Create a strong password
             </h2>
-            <p className="text-base text-slate-600 dark:text-slate-400 mt-2 font-normal">
-              Use a password you'll remember and keep private.
-            </p>
           </div>
 
           <div className="mt-6 space-y-4">
             <AuthPasswordField
               label="Password"
               value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                if (error) setError('');
-              }}
+              onChange={(e) => setPassword(e.target.value)}
               required
               autoFocus
             />
@@ -446,239 +377,98 @@ export const SignUpPage: React.FC = () => {
             <AuthPasswordField
               label="Confirm password"
               value={confirmPassword}
-              onChange={(e) => {
-                setConfirmPassword(e.target.value);
-                if (error) setError('');
-              }}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               error={confirmPassword && password !== confirmPassword ? 'Passwords do not match' : undefined}
               required
             />
 
-            {/* PASSWORD STRENGTH INDICATOR */}
             <PasswordStrengthIndicator password={password} />
           </div>
 
           <div className="flex items-center justify-between pt-8">
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <MexoButton
-              type="submit"
-              disabled={password.length < 8 || password !== confirmPassword}
-              size="lg"
-              className="px-8 h-12 rounded-lg font-semibold text-sm"
-            >
-              Next
-            </MexoButton>
+            <button type="button" onClick={() => setStep(3)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" disabled={password.length < 8 || password !== confirmPassword} size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Next</MexoButton>
           </div>
         </form>
       )}
 
-      {/* STEP 5: Display Picture / Avatar Selection */}
+      {/* STEP 5: Avatar Selection */}
       {step === 5 && (
         <form onSubmit={handleStep5Next} className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-normal text-slate-900 dark:text-slate-100 tracking-tight">
-              Choose profile picture (DP)
+              Choose profile picture
             </h2>
-            <p className="text-base text-slate-600 dark:text-slate-400 mt-2 font-normal">
-              Personalize your MEXO account avatar.
-            </p>
           </div>
 
           <div className="mt-6">
-            <AvatarPicker
-              selectedAvatar={avatarUrl}
-              name={`${firstName} ${lastName}`}
-              onSelectAvatar={(url) => setAvatarUrl(url)}
-            />
+            <AvatarPicker selectedAvatar={avatarUrl} name={`${firstName} ${lastName}`} onSelectAvatar={(url) => setAvatarUrl(url)} />
           </div>
 
           <div className="flex items-center justify-between pt-8">
-            <button
-              type="button"
-              onClick={() => setStep(4)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={() => setStep(6)}
-                className="text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              >
-                Skip for now
-              </button>
-              <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">
-                Next
-              </MexoButton>
-            </div>
+            <button type="button" onClick={() => setStep(4)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Next</MexoButton>
           </div>
         </form>
       )}
 
-      {/* STEP 6: Recovery Option */}
+      {/* STEP 6: Recovery Email */}
       {step === 6 && (
         <form onSubmit={handleStep6Next} className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-normal text-slate-900 dark:text-slate-100 tracking-tight">
-              Add a recovery option
+              Add recovery email
             </h2>
-            <p className="text-base text-slate-600 dark:text-slate-400 mt-2 font-normal">
-              A recovery option helps you get back into your account if you forget your password.
-            </p>
           </div>
 
           <div className="mt-7 space-y-2">
-            <AuthTextField
-              label="Recovery email"
-              type="email"
-              placeholder="name@example.com"
-              value={recoveryEmail}
-              onChange={(e) => setRecoveryEmail(e.target.value)}
-              helperText="Used strictly for password recovery and security alerts."
-            />
+            <AuthTextField label="Recovery email" type="email" placeholder="name@example.com" value={recoveryEmail} onChange={(e) => setRecoveryEmail(e.target.value)} />
           </div>
 
           <div className="flex items-center justify-between pt-9">
-            <button
-              type="button"
-              onClick={() => setStep(5)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <div className="flex items-center space-x-3">
-              <button
-                type="button"
-                onClick={() => setStep(7)}
-                className="text-sm font-bold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              >
-                Skip for now
-              </button>
-              <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">
-                Next
-              </MexoButton>
-            </div>
+            <button type="button" onClick={() => setStep(5)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Next</MexoButton>
           </div>
         </form>
       )}
 
-      {/* STEP 7: Review Account Information */}
+      {/* STEP 7: Review Account */}
       {step === 7 && (
         <form onSubmit={handleCreateAccountFinal} className="w-full">
           <div>
             <h2 className="text-2xl md:text-[32px] font-normal text-slate-900 dark:text-slate-100 tracking-tight">
               Review your MEXO Account
             </h2>
-            <p className="text-base text-slate-600 dark:text-slate-400 mt-2 font-normal">
-              Confirm your account information to finish registration.
-            </p>
           </div>
 
-          <div className="mt-6 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-4 shadow-sm">
+          <div className="mt-6 p-5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-4">
             <div className="flex items-center space-x-4">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt={`${firstName} ${lastName}`}
-                  className="w-16 h-16 rounded-2xl object-cover ring-2 ring-mexo-500/30"
-                />
-              ) : (
-                <MexoAvatar name={`${firstName} ${lastName}`} size="lg" />
-              )}
+              <MexoAvatar name={`${firstName} ${lastName}`} src={avatarUrl} size="lg" />
               <div>
-                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">
-                  {firstName} {lastName}
-                </p>
-                <p className="text-sm font-mono font-bold text-mexo-600 dark:text-mexo-400">
-                  {username.toLowerCase()}@mexo.com
-                </p>
+                <p className="font-bold text-lg text-slate-900 dark:text-slate-100">{firstName} {lastName}</p>
+                <p className="text-sm font-mono font-bold text-mexo-600">{username.toLowerCase()}@mexo.com</p>
               </div>
             </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400">
-              <div>
-                <span className="font-semibold block text-slate-400">Date of Birth:</span>
-                <span className="font-medium text-slate-800 dark:text-slate-200">{getFormattedDobString()}</span>
-              </div>
-              <div>
-                <span className="font-semibold block text-slate-400">Gender:</span>
-                <span className="font-medium text-slate-800 dark:text-slate-200">{gender}</span>
-              </div>
-            </div>
-
-            {recoveryEmail && (
-              <div className="pt-3 border-t border-slate-200 dark:border-slate-700 text-xs text-slate-600 dark:text-slate-400">
-                <span className="font-semibold block text-slate-400">Recovery Email:</span>
-                <span className="font-medium text-slate-800 dark:text-slate-200">{recoveryEmail}</span>
-              </div>
-            )}
-
-            <div className="text-xs text-slate-500 pt-3 border-t border-slate-200 dark:border-slate-700">
-              By clicking Create account, you agree to MEXO's Terms of Service and Privacy Policy.
-            </div>
+            {error && <p className="text-xs text-rose-600 font-bold">{error}</p>}
           </div>
 
           <div className="flex items-center justify-between pt-8">
-            <button
-              type="button"
-              onClick={() => setStep(6)}
-              className="text-sm font-bold text-mexo-600 dark:text-mexo-400 hover:text-mexo-700"
-            >
-              Back
-            </button>
-
-            <MexoButton type="submit" variant="primary" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">
-              Create account
-            </MexoButton>
+            <button type="button" onClick={() => setStep(6)} className="text-sm font-bold text-mexo-600">Back</button>
+            <MexoButton type="submit" isLoading={isSubmitting} variant="primary" size="lg" className="px-8 h-12 rounded-lg font-semibold text-sm">Create account</MexoButton>
           </div>
         </form>
       )}
 
-      {/* STEP 8: Welcome Celebration State */}
+      {/* STEP 8: Celebration */}
       {step === 8 && (
         <div className="w-full text-center py-4 space-y-6">
-          <div className="relative w-20 h-20 mx-auto">
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt={`${firstName} ${lastName}`}
-                className="w-20 h-20 rounded-2xl object-cover ring-4 ring-emerald-500/30 shadow-lg"
-              />
-            ) : (
-              <div className="w-20 h-20 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-mexo-sm">
-                <Check className="w-10 h-10 stroke-[2.5]" />
-              </div>
-            )}
-          </div>
-
           <div>
             <h2 className="text-2xl md:text-[32px] font-extrabold text-slate-900 dark:text-slate-100 tracking-tight">
               Welcome to MEXO, {firstName}!
             </h2>
-            <p className="text-base font-bold text-mexo-600 dark:text-mexo-400 mt-1 font-mono">
-              {username.toLowerCase()}@mexo.com
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              Your MEXO Mail identity and profile are ready.
-            </p>
+            <p className="text-base font-bold text-mexo-600 dark:text-mexo-400 mt-1 font-mono">{username.toLowerCase()}@mexo.com</p>
           </div>
-
-          <MexoButton
-            onClick={() => navigate('/mail/inbox')}
-            size="lg"
-            className="w-full h-13 rounded-lg font-semibold text-base py-3"
-            rightIcon={<ArrowRight className="w-4 h-4" />}
-          >
+          <MexoButton onClick={() => navigate('/mail/inbox')} size="lg" className="w-full h-13 rounded-lg font-semibold text-base py-3" rightIcon={<ArrowRight className="w-4 h-4" />}>
             Open MEXO Mail
           </MexoButton>
         </div>

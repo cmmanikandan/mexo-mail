@@ -10,6 +10,7 @@ import { ComposeContainer } from '../../components/compose/ComposeModal';
 import { MexoToastContainer } from '../../components/common/MexoToast';
 import { useMailStore } from '../../store/mailStore';
 import { useUIStore } from '../../store/uiStore';
+import { useAuthStore } from '../../store/authStore';
 import { db, UserSettings } from '../../services/db';
 import { notificationService } from '../../services/notificationService';
 import {
@@ -44,7 +45,7 @@ import {
 // ─── Mobile Settings Home ───────────────────────────────────────────────────────
 const MobileSettingsHome: React.FC = () => {
   const navigate = useNavigate();
-  const currentUser = db.getCurrentUser();
+  const { currentUser } = useAuthStore();
 
   const handleBack = () => {
     navigate('/mail/inbox');
@@ -100,17 +101,17 @@ const MobileSettingsHome: React.FC = () => {
               className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700/60 p-4 flex items-center space-x-3.5 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/60 active:scale-98 transition-all shadow-sm"
             >
               <MexoAvatar
-                name={`${currentUser.firstName} ${currentUser.lastName}`}
-                src={currentUser.avatarUrl}
+                name={`${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`}
+                src={currentUser?.avatarUrl}
                 size="lg"
                 className="w-12 h-12 text-lg shadow-sm flex-shrink-0"
               />
               <div className="flex-1 min-w-0">
                 <h3 className="font-bold text-sm text-app-heading truncate">
-                  {currentUser.firstName} {currentUser.lastName}
+                  {currentUser?.firstName} {currentUser?.lastName}
                 </h3>
                 <p className="text-xs text-app-muted truncate font-mono mt-0.5">
-                  {currentUser.email}
+                  {currentUser?.email}
                 </p>
               </div>
               <ChevronRight className="w-5 h-5 text-slate-300 dark:text-slate-600 flex-shrink-0" />
@@ -168,7 +169,7 @@ export const SettingsPage: React.FC = () => {
   const { density, setDensity } = useMailStore();
   const { theme, setTheme, addToast } = useUIStore();
 
-  const currentUser = db.getCurrentUser();
+  const { currentUser } = useAuthStore();
   const currentPath = location.pathname;
   const isSettingsRoot = currentPath === '/settings' || currentPath === '/settings/';
 
@@ -860,7 +861,7 @@ export const SettingsPage: React.FC = () => {
 
     // 13. STORAGE
     if (isStorage) {
-      const storageInfo = db.getStorageForUser(currentUser.email);
+      const storageInfo = db.getStorageForUser(currentUser?.email || '');
       const limitGB = (storageInfo.limitBytes / (1024 * 1024 * 1024)).toFixed(0);
 
       return (
@@ -940,7 +941,7 @@ export const SettingsPage: React.FC = () => {
       };
 
       const handleExportMailJSON = () => {
-        const msgs = db.getMessagesForUser(currentUser.email);
+        const msgs = db.getMessagesForUser(currentUser?.email || '');
         const dataStr = JSON.stringify(msgs, null, 2);
         const blob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);

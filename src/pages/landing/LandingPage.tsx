@@ -44,8 +44,8 @@ export const LandingPage: React.FC = () => {
           {isAuthenticated ? (
             <div className="flex items-center space-x-3">
               <div className="hidden sm:flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-app-border">
-                <MexoAvatar name={`${currentUser.firstName} ${currentUser.lastName}`} src={currentUser.avatarUrl} size="sm" className="w-5 h-5 text-[9px]" />
-                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{currentUser.firstName}</span>
+                <MexoAvatar name={`${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`} src={currentUser?.avatarUrl} size="sm" className="w-5 h-5 text-[9px]" />
+                <span className="text-xs font-bold text-slate-800 dark:text-slate-200">{currentUser?.firstName}</span>
               </div>
               <button
                 onClick={() => navigate('/mail/inbox')}

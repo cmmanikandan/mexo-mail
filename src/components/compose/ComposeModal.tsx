@@ -210,25 +210,21 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       subject: instance.subject || '(No Subject)',
       bodyHtml: instance.bodyHtml,
       attachments: instance.attachments,
-      clientMessageId,
     });
 
     useMailStore.getState().triggerRefresh();
 
     // Broadcast to all tabs + trigger same-tab refresh immediately
     realtimeService.broadcastRefresh();
-    // Also emit NEW_MESSAGE events for each recipient in same-tab detection
-    createdMessages.forEach((m) => {
-      if (m.userState.recipientEmail.toLowerCase() !== currentUser.email.toLowerCase()) {
-        realtimeService.broadcastNewMessage({
-          type: 'NEW_MESSAGE',
-          messageId: m.id,
-          senderName: m.senderName,
-          subject: m.subject,
-          recipientEmail: m.userState.recipientEmail,
-        });
-      }
-    });
+    if (currentUser?.email) {
+      realtimeService.broadcastNewMessage({
+        type: 'NEW_MESSAGE',
+        messageId: clientMessageId,
+        senderName: `${currentUser.firstName} ${currentUser.lastName}`.trim(),
+        subject: instance.subject || '(No Subject)',
+        recipientEmail: instance.to[0] || '',
+      });
+    }
 
     closeCompose(instance.id, true);
     addToast({ message: 'Message sent', type: 'success' });

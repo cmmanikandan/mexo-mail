@@ -94,17 +94,17 @@ export const SettingsNavigation: React.FC = () => {
         title="Manage MEXO Account"
       >
         <MexoAvatar
-          name={`${currentUser.firstName} ${currentUser.lastName}`}
-          src={currentUser.avatarUrl}
+          name={`${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`}
+          src={currentUser?.avatarUrl}
           size="md"
           className="w-10 h-10 text-xs shadow-sm flex-shrink-0"
         />
         <div className="flex-1 min-w-0">
           <p className="font-bold text-xs text-app-heading truncate">
-            {currentUser.firstName} {currentUser.lastName}
+            {currentUser?.firstName} {currentUser?.lastName}
           </p>
           <p className="text-[11px] text-app-primary font-mono truncate mt-0.5">
-            {currentUser.email}
+            {currentUser?.email}
           </p>
         </div>
         <ChevronRight className="w-4 h-4 text-app-primary flex-shrink-0 ml-1" />

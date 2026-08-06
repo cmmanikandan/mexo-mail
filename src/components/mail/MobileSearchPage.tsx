@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useMailStore } from '../../store/mailStore';
+import { useMailStore, MailFolder } from '../../store/mailStore';
 import { db } from '../../services/db';
+import { useAuthStore } from '../../store/authStore';
 import { filterMessagesByQuery } from '../../utils/SearchQueryParser';
 import {
   ArrowLeft,
@@ -125,8 +126,9 @@ export const MobileSearchPage: React.FC = () => {
     }
   }, []);
 
-  const currentUser = db.getCurrentUser();
-  const allMessages = db.getMessagesForUser(currentUser.email);
+  const { currentUser } = useAuthStore();
+  const userEmail = currentUser?.email?.toLowerCase() || '';
+  const allMessages = db.getMessagesForUser(userEmail);
   const contacts = db.getContacts();
   const labels = db.getLabels();
 
@@ -145,7 +147,7 @@ export const MobileSearchPage: React.FC = () => {
 
     // Add recent email senders
     allMessages.forEach((m) => {
-      if (m.senderEmail && m.senderEmail.toLowerCase() !== currentUser.email.toLowerCase()) {
+      if (m.senderEmail && m.senderEmail.toLowerCase() !== userEmail) {
         const key = m.senderEmail.toLowerCase();
         if (!peopleMap.has(key)) {
           peopleMap.set(key, {
@@ -158,7 +160,7 @@ export const MobileSearchPage: React.FC = () => {
     });
 
     return Array.from(peopleMap.values()).slice(0, 6);
-  }, [contacts, allMessages, currentUser.email]);
+  }, [contacts, allMessages, userEmail]);
 
   // Live Suggestions while typing
   const isTyping = !hasSearched && displayQuery.trim().length > 0;

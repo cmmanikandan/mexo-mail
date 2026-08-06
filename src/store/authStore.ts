@@ -1,11 +1,29 @@
 import { create } from 'zustand';
 import { MexoUser } from '../types/user';
-import { db } from '../services/db';
+import { supabase } from '../services/supabaseClient';
+import { api } from '../services/api';
+
+const DEFAULT_GUEST_USER: MexoUser = {
+  id: 'guest-user',
+  username: 'guest',
+  email: 'guest@mexo.com',
+  firstName: 'MEXO',
+  lastName: 'User',
+  role: 'user',
+  status: 'active',
+  storageUsedBytes: 0,
+  storageLimitBytes: 15 * 1024 * 1024 * 1024,
+  createdAt: new Date().toISOString(),
+  lastActiveAt: new Date().toISOString(),
+  twoFactorEnabled: false,
+};
 
 interface AuthStore {
   currentUser: MexoUser;
   isAuthenticated: boolean;
-  signIn: (emailOrUsername: string, passwordInput?: string) => boolean;
+  isLoading: boolean;
+  error: string | null;
+  signIn: (emailOrUsername: string, passwordInput: string) => Promise<boolean>;
   signUp: (data: {
     firstName: string;
     lastName: string;
@@ -15,97 +33,143 @@ interface AuthStore {
     dob?: string;
     gender?: string;
     avatarUrl?: string;
-  }) => MexoUser;
-  signOut: () => void;
-  updateCurrentUser: (updates: Partial<MexoUser>) => void;
+  }) => Promise<MexoUser | null>;
+  signOut: () => Promise<void>;
+  updateCurrentUser: (updates: Partial<MexoUser>) => Promise<void>;
+  initializeAuth: () => Promise<void>;
 }
 
-const DEFAULT_USER: MexoUser = {
-  id: 'usr-1',
-  username: 'manikandanprabhu1221',
-  email: 'manikandanprabhu1221@mexo.com',
-  firstName: 'Manikandan',
-  lastName: 'CM',
-  role: 'user',
-  status: 'active',
-  storageUsedBytes: 5.2 * 1024 * 1024 * 1024,
-  storageLimitBytes: 15 * 1024 * 1024 * 1024,
-  createdAt: new Date().toISOString(),
-  lastActiveAt: new Date().toISOString(),
-  twoFactorEnabled: false,
-};
+export const useAuthStore = create<AuthStore>((set, get) => ({
+  currentUser: DEFAULT_GUEST_USER,
+  isAuthenticated: false,
+  isLoading: true,
+  error: null,
 
-const initialUserId = typeof localStorage !== 'undefined' ? localStorage.getItem('mexo_current_user_id_v1') : null;
-const hasActiveSession = typeof localStorage !== 'undefined' ? localStorage.getItem('mexo_session_active_v1') === 'true' : false;
+  initializeAuth: async () => {
+    try {
+      set({ isLoading: true, error: null });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const sessionUser = sessionData?.session?.user;
 
-const initialUser = initialUserId ? db.getUserById(initialUserId) : null;
+      if (sessionUser) {
+        let profile = await api.getCurrentUserProfile(sessionUser.id);
+        if (!profile) {
+          const email = sessionUser.email || 'user@mexo.com';
+          const username = email.split('@')[0];
+          const created = await api.createUserAccount({
+            firstName: username,
+            lastName: '',
+            username,
+          });
+          profile = created.user;
+        }
 
-export const useAuthStore = create<AuthStore>((set) => ({
-  currentUser: initialUser || db.getCurrentUser(),
-  isAuthenticated: hasActiveSession,
-
-  signIn: (emailOrUsername: string, passwordInput?: string) => {
-    let clean = emailOrUsername.trim().toLowerCase();
-    if (!clean.includes('@')) {
-      clean = `${clean}@mexo.com`;
-    }
-    let user = db.getUserByEmail(clean);
-
-    if (!user || user.status !== 'active') {
-      return false;
-    }
-
-    // STRICT Password Checking
-    if (passwordInput !== undefined) {
-      const cleanPass = passwordInput.trim();
-      const expectedPass = (user.password || 'password123').trim();
-      
-      let isCorrect = cleanPass === expectedPass;
-      if (user.role === 'system_admin') {
-        isCorrect = cleanPass === 'admin' || cleanPass === 'admin123';
+        if (profile && profile.status !== 'suspended') {
+          set({ currentUser: profile, isAuthenticated: true, isLoading: false });
+          return;
+        }
       }
 
-      if (!isCorrect) {
-        db.addAuditLog(user.email, 'USER_SIGN_IN_FAILED', user.email, 'failed');
+      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false });
+    } catch (err) {
+      console.error('Auth initialization failed:', err);
+      set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false });
+    }
+  },
+
+  signIn: async (emailOrUsername: string, passwordInput: string): Promise<boolean> => {
+    try {
+      set({ isLoading: true, error: null });
+      const cleanEmail = await api.resolveUsernameToEmail(emailOrUsername);
+      const cleanPassword = passwordInput.trim();
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: cleanPassword,
+      });
+
+      if (authError || !authData.user) {
+        if (cleanEmail === 'admin@mexo.com' && (cleanPassword === 'admin' || cleanPassword === 'admin123')) {
+          const createdAdmin = await api.createUserAccount({
+            firstName: 'Admin',
+            lastName: 'System',
+            username: 'admin',
+            password: cleanPassword,
+            role: 'system_admin',
+          });
+          if (createdAdmin.user) {
+            set({ currentUser: createdAdmin.user, isAuthenticated: true, isLoading: false });
+            return true;
+          }
+        }
+
+        set({ error: authError?.message || 'Invalid credentials', isLoading: false });
+        await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
         return false;
       }
-    }
 
-    db.setCurrentUser(user.id);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('mexo_session_active_v1', 'true');
+      let profile = await api.getCurrentUserProfile(authData.user.id);
+      if (!profile) {
+        const username = cleanEmail.split('@')[0];
+        const created = await api.createUserAccount({
+          firstName: username,
+          lastName: '',
+          username,
+        });
+        profile = created.user;
+      }
+
+      if (!profile || profile.status === 'suspended') {
+        set({ error: 'Account is suspended or unavailable.', isLoading: false });
+        return false;
+      }
+
+      set({ currentUser: profile, isAuthenticated: true, isLoading: false });
+      await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
+      return true;
+    } catch (err: any) {
+      console.error('SignIn failed:', err);
+      set({ error: err?.message || 'Sign in failed', isLoading: false });
+      return false;
     }
-    set({ currentUser: user, isAuthenticated: true });
-    db.addAuditLog(user.email, 'USER_SIGN_IN', user.email, 'success');
-    return true;
   },
 
-  signUp: (data) => {
-    const newUser = db.createUser(data);
-    db.setCurrentUser(newUser.id);
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem('mexo_session_active_v1', 'true');
+  signUp: async (data) => {
+    try {
+      set({ isLoading: true, error: null });
+      const result = await api.createUserAccount(data);
+      if (result.error || !result.user) {
+        set({ error: result.error || 'Registration failed', isLoading: false });
+        return null;
+      }
+
+      const primaryEmail = `${data.username.toLowerCase().trim()}@mexo.com`;
+      const pwd = data.password || data.username.toLowerCase().trim();
+      await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
+
+      set({ currentUser: result.user, isAuthenticated: true, isLoading: false });
+      return result.user;
+    } catch (err: any) {
+      set({ error: err?.message || 'Sign up failed', isLoading: false });
+      return null;
     }
-    set({ currentUser: newUser, isAuthenticated: true });
-    return newUser;
   },
 
-  signOut: () => {
-    const user = db.getCurrentUser();
-    if (user) {
-      db.addAuditLog(user.email, 'USER_SIGN_OUT', user.email, 'success');
+  signOut: async () => {
+    const current = get().currentUser;
+    if (current && current.email !== 'guest@mexo.com') {
+      await api.addAuditLog(current.email, 'USER_SIGN_OUT', current.email, 'success');
     }
-    db.setCurrentUser('');
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('mexo_session_active_v1');
-    }
-    set({ currentUser: null as any, isAuthenticated: false });
+    await supabase.auth.signOut();
+    set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false, error: null });
   },
 
-  updateCurrentUser: (updates) => {
-    set((state) => {
-      const updated = db.updateUser(state.currentUser.id, updates);
-      return { currentUser: updated };
-    });
+  updateCurrentUser: async (updates) => {
+    const current = get().currentUser;
+    if (!current || current.id === 'guest-user') return;
+    const updated = await api.updateUserProfile(current.id, updates);
+    if (updated) {
+      set({ currentUser: updated });
+    }
   },
 }));
