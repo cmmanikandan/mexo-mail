@@ -401,36 +401,51 @@ export const api = {
   async updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
     try {
       console.log('[AUTH] Password update initiated');
-      let session: any = null;
-      try {
-        session = await mexoPlatformAuth.ensureAuthenticatedSession();
-      } catch (e: any) {
-        console.error('[AUTH] Session verification error:', e);
-        return { success: false, error: 'SESSION_EXPIRED' };
-      }
+
+      // 1. Verify there is an active Supabase Auth session
+      const { data: sessionData } = await supabase.auth.getSession();
+      const session = sessionData?.session;
 
       if (!session?.user) {
-        console.error('[AUTH] Password update failed: No active Supabase Auth user session.');
-        return { success: false, error: 'SESSION_EXPIRED' };
+        // Try session refresh once
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        if (!refreshData?.session?.user) {
+          console.error('[AUTH] Password update failed: No active session.');
+          return { success: false, error: 'SESSION_EXPIRED' };
+        }
       }
 
-      console.log('[AUTH] Executing Supabase Auth updateUser for user ID:', session.user.id);
-      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
-      if (updateError) {
-        console.error('[AUTH] Supabase Auth updateUser error:', updateError.message);
-        return { success: false, error: updateError.message };
+      console.log('[AUTH] Session confirmed — updating password via SECURITY DEFINER RPC');
+
+      // 2. Call the SECURITY DEFINER RPC to update auth.users.encrypted_password directly
+      // This works for ALL account types including admin-created accounts
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('update_user_password', {
+        p_new_password: newPassword,
+      });
+
+      if (rpcError) {
+        console.error('[AUTH] RPC update_user_password error:', rpcError.message);
+        // Fallback to supabase.auth.updateUser if RPC not yet deployed
+        if (rpcError.message?.includes('does not exist') || rpcError.message?.includes('Could not find')) {
+          console.log('[AUTH] RPC not found, falling back to supabase.auth.updateUser');
+          const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+          if (updateError) {
+            console.error('[AUTH] Supabase Auth updateUser error:', updateError.message);
+            return { success: false, error: updateError.message };
+          }
+          console.log('[AUTH] Password updated via supabase.auth.updateUser fallback!');
+          return { success: true };
+        }
+        return { success: false, error: rpcError.message };
       }
 
-      console.log('[AUTH] Password updated successfully in Supabase Auth server!');
-
-      // Synchronize database profile timestamp
-      if (session.user.email) {
-        await supabase
-          .from('profiles')
-          .update({ updated_at: new Date().toISOString() })
-          .eq('id', session.user.id);
+      const result = rpcResult as any;
+      if (!result?.success) {
+        console.error('[AUTH] RPC returned failure:', result?.error);
+        return { success: false, error: result?.error || 'Failed to update password.' };
       }
 
+      console.log('[AUTH] Password updated successfully via RPC!');
       return { success: true };
     } catch (err: any) {
       console.error('[AUTH] Password update exception:', err);

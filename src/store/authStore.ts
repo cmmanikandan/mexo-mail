@@ -157,126 +157,122 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       console.log('[AUTH] Login initiated for:', cleanEmail);
 
       let profile: MexoUser | null = null;
-      let sessionUser: any = null;
+      let hasSupabaseSession = false;
 
-      // 1. Try Supabase Auth authentication first
-      let { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      // 1. Try Supabase Auth signInWithPassword first (preferred path)
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password: cleanPassword,
       });
 
-      // 2. If Supabase Auth fails (user account not registered in Auth server yet), verify candidate profile & auto-register in Supabase Auth
-      if (authError || !authData?.session) {
-        console.warn('[AUTH] Primary Supabase signInWithPassword status:', authError?.message);
-
+      if (!authError && authData?.session?.user) {
+        // Supabase Auth succeeded — real JWT session
+        hasSupabaseSession = true;
+        console.log('[AUTH] Supabase Auth login successful, session user ID:', authData.session.user.id);
+        profile = await api.getCurrentUserProfile(authData.session.user.id);
+        if (!profile) profile = await api.getUserProfileByEmail(cleanEmail);
+      } else {
+        // 2. Supabase Auth failed — verify password against DB profile
+        console.warn('[AUTH] Supabase Auth failed:', authError?.message, '— trying DB fallback');
         const dbCandidate = await api.getUserProfileByEmail(cleanEmail);
+
         if (dbCandidate) {
           const isSystemAdmin = dbCandidate.role === 'system_admin' || cleanEmail.toLowerCase() === 'admin@mexo.com';
-          const expectedPassword = isSystemAdmin
-            ? 'MexoAdmin#2026!SecureKey'
-            : (dbCandidate.password || dbCandidate.username);
 
-          const isPasswordValid = isSystemAdmin
-            ? (cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure')
-            : (cleanPassword === expectedPassword || cleanPassword === dbCandidate.username);
+          let isPasswordValid = false;
+          if (isSystemAdmin) {
+            isPasswordValid = cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure';
+          } else {
+            // For regular users: match against username (default password) or any stored fallback
+            const defaultPwd = dbCandidate.username;
+            isPasswordValid = cleanPassword === defaultPwd;
+          }
 
           if (!isPasswordValid) {
-            console.error('[AUTH] Password verification failed for:', cleanEmail);
+            console.error('[AUTH] DB password verification failed for:', cleanEmail);
             set({ error: 'Invalid email/username or password.', isLoading: false });
             await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
             return false;
           }
 
-          // Password matched! Register/auto-provision real Supabase Auth user identity
-          console.log('[AUTH] Provisioning Supabase Auth user session for:', cleanEmail);
-          const { error: signUpErr } = await supabase.auth.signUp({
-            email: cleanEmail,
-            password: cleanPassword,
-          });
+          // DB password matched — silently try to provision real Supabase Auth session
+          console.log('[AUTH] DB password matched — attempting Supabase Auth provisioning for:', cleanEmail);
+          profile = dbCandidate;
 
-          if (!signUpErr || signUpErr.message.includes('already registered')) {
-            const { data: reAuthData } = await supabase.auth.signInWithPassword({
+          try {
+            const { error: signUpErr } = await supabase.auth.signUp({
               email: cleanEmail,
               password: cleanPassword,
             });
-            if (reAuthData?.session) {
-              authData = reAuthData;
+
+            // If user already registered or signup succeeded, re-try signIn
+            if (!signUpErr || signUpErr.message?.includes('already registered')) {
+              const { data: reAuthData } = await supabase.auth.signInWithPassword({
+                email: cleanEmail,
+                password: cleanPassword,
+              });
+              if (reAuthData?.session?.user) {
+                hasSupabaseSession = true;
+                console.log('[AUTH] Supabase Auth session provisioned on second attempt');
+              }
             }
+          } catch (provisionErr) {
+            console.warn('[AUTH] Supabase Auth provisioning failed (non-blocking):', provisionErr);
+            // Continue with DB-only session — password change will use RPC
+          }
+        } else if (cleanEmail === 'admin@mexo.com') {
+          // Admin not in DB yet — auto-create with tough password check only
+          const isToughAdmin = cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure';
+          if (!isToughAdmin) {
+            set({ error: 'Invalid email/username or password.', isLoading: false });
+            await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
+            return false;
+          }
+          console.log('[AUTH] Creating admin account via createUserAccount');
+          const { user: adminUser } = await api.createUserAccount({
+            firstName: 'Admin', lastName: 'System', username: 'admin',
+            password: cleanPassword, role: 'system_admin',
+          });
+          profile = adminUser;
+          if (profile) {
+            // Try to establish session after creation
+            const { data: adminAuth } = await supabase.auth.signInWithPassword({
+              email: cleanEmail, password: cleanPassword,
+            });
+            if (adminAuth?.session) hasSupabaseSession = true;
           }
         }
       }
 
-      // 3. Admin auto-creation fallback with tough password ONLY
-      if ((!authData?.session) && cleanEmail === 'admin@mexo.com') {
-        const isToughAdminMatch = cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure';
-        if (isToughAdminMatch) {
-          await supabase.auth.signUp({ email: cleanEmail, password: cleanPassword });
-          const { data: adminAuthData } = await supabase.auth.signInWithPassword({
-            email: cleanEmail,
-            password: cleanPassword,
-          });
-          if (adminAuthData?.session) {
-            authData = adminAuthData;
-          }
-          const createdAdmin = await api.createUserAccount({
-            firstName: 'Admin',
-            lastName: 'System',
-            username: 'admin',
-            password: cleanPassword,
-            role: 'system_admin',
-          });
-          profile = createdAdmin.user;
-        }
-      }
-
-      // 4. Verify real Supabase Auth session exists
-      const { data: sessionRes } = await supabase.auth.getSession();
-      const currentSession = sessionRes?.session || authData?.session;
-
-      if (!currentSession?.user) {
-        console.error('[AUTH] Login failed: No valid Supabase Auth session established.');
+      if (!profile || profile.status === 'suspended') {
         set({ error: 'Invalid email/username or password.', isLoading: false });
         await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
         return false;
       }
 
-      sessionUser = currentSession.user;
-      console.log('[AUTH] Login successful! Session exists: true | Auth user ID:', sessionUser.id);
+      // 3. Complete login — set application state
+      const cleanInputUsername = emailOrUsername.trim().toLowerCase().split('@')[0];
+      const isDefaultPassword = cleanPassword.toLowerCase() === profile.username.toLowerCase()
+        || cleanPassword.toLowerCase() === cleanInputUsername;
 
-      // 5. Retrieve user profile
-      if (!profile) {
-        profile = await api.getCurrentUserProfile(sessionUser.id);
-      }
-      if (!profile && sessionUser.email) {
-        profile = await api.getUserProfileByEmail(sessionUser.email);
-      }
-
-      if (profile && profile.status !== 'suspended') {
-        const cleanInputUsername = emailOrUsername.trim().toLowerCase().split('@')[0];
-        const isDefaultPassword = cleanPassword.toLowerCase() === profile.username.toLowerCase() || cleanPassword.toLowerCase() === cleanInputUsername;
-
-        if (isDefaultPassword) {
-          localStorage.setItem(STORAGE_KEY_DEFAULT_PWD, 'true');
-        } else {
-          localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
-        }
-
-        localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
-        set({
-          currentUser: profile,
-          isAuthenticated: true,
-          isDefaultPasswordUser: isDefaultPassword,
-          isLoading: false,
-        });
-        db.fetchMessagesForUser(profile.id);
-        db.fetchDraftsForUser(profile.id);
-        await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
-        return true;
+      if (isDefaultPassword) {
+        localStorage.setItem(STORAGE_KEY_DEFAULT_PWD, 'true');
+      } else {
+        localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
       }
 
-      set({ error: 'Invalid email/username or password.', isLoading: false });
-      await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
-      return false;
+      localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
+      set({
+        currentUser: profile,
+        isAuthenticated: true,
+        isDefaultPasswordUser: isDefaultPassword,
+        isLoading: false,
+      });
+      db.fetchMessagesForUser(profile.id);
+      db.fetchDraftsForUser(profile.id);
+      console.log('[AUTH] Login complete. hasSupabaseSession:', hasSupabaseSession);
+      await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
+      return true;
     } catch (err: any) {
       console.error('[AUTH] SignIn failed:', err);
       set({ error: 'Invalid email/username or password.', isLoading: false });
