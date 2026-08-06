@@ -266,23 +266,22 @@ class MexoDatabase {
   async syncCloudUsers(): Promise<MexoUser[]> {
     try {
       const cloudUsers = await cloudSync.fetchCloudUsers();
-      if (!cloudUsers || cloudUsers.length === 0) return this.getUsers();
-
       const localUsers = this.getUsers();
       const userMap = new Map<string, MexoUser>();
 
+      INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
       localUsers.forEach((u) => userMap.set(u.id, u));
-      cloudUsers.forEach((u) => {
-        const existing = userMap.get(u.id);
-        if (!existing) {
-          userMap.set(u.id, u);
-        } else {
-          userMap.set(u.id, { ...existing, ...u });
-        }
-      });
+
+      if (cloudUsers && cloudUsers.length > 0) {
+        cloudUsers.forEach((u) => {
+          const existing = userMap.get(u.id);
+          userMap.set(u.id, existing ? { ...existing, ...u } : u);
+        });
+      }
 
       const merged = Array.from(userMap.values());
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+      cloudSync.pushCloudUsers(merged).catch(() => {});
       return merged;
     } catch {
       return this.getUsers();
@@ -290,7 +289,21 @@ class MexoDatabase {
   }
 
   getUsers(): MexoUser[] {
-    return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
+    const raw = localStorage.getItem(STORAGE_KEYS.USERS);
+    const stored: MexoUser[] = raw ? JSON.parse(raw) : [];
+
+    const userMap = new Map<string, MexoUser>();
+    INITIAL_USERS.forEach((u) => userMap.set(u.id, u));
+    stored.forEach((u) => {
+      const existing = userMap.get(u.id);
+      userMap.set(u.id, existing ? { ...existing, ...u } : u);
+    });
+
+    const result = Array.from(userMap.values());
+    if (stored.length !== result.length) {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(result));
+    }
+    return result;
   }
 
   getUserById(id: string): MexoUser | undefined {
