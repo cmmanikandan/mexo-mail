@@ -233,6 +233,36 @@ class MexoDatabase {
   }
 
   // --- USER & AUTH APIS ---
+  async syncCloudDatabase(): Promise<void> {
+    try {
+      const payload = await cloudSync.fetchCloudDatabase();
+      if (!payload) return;
+
+      if (payload.users && payload.users.length > 0) {
+        const localUsers = this.getUsers();
+        const userMap = new Map<string, MexoUser>();
+        localUsers.forEach((u) => userMap.set(u.id, u));
+        payload.users.forEach((u) => {
+          const existing = userMap.get(u.id);
+          userMap.set(u.id, existing ? { ...existing, ...u } : u);
+        });
+        localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(Array.from(userMap.values())));
+      }
+
+      if (payload.messages && payload.messages.length > 0) {
+        const localMsgs = this.getMessages();
+        const msgMap = new Map<string, Message>();
+        localMsgs.forEach((m) => msgMap.set(m.id, m));
+        payload.messages.forEach((m) => {
+          if (!msgMap.has(m.id)) msgMap.set(m.id, m);
+        });
+        localStorage.setItem(STORAGE_KEYS.MESSAGES, JSON.stringify(Array.from(msgMap.values())));
+      }
+    } catch (err) {
+      console.warn('Cloud database sync error:', err);
+    }
+  }
+
   async syncCloudUsers(): Promise<MexoUser[]> {
     try {
       const cloudUsers = await cloudSync.fetchCloudUsers();

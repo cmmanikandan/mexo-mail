@@ -14,6 +14,14 @@ export const AdminStoragePage: React.FC = () => {
   const [newQuotaGb, setNewQuotaGb] = useState('15');
   const [searchTerm, setSearchTerm] = useState('');
 
+  React.useEffect(() => {
+    let isMounted = true;
+    db.syncCloudUsers().then((synced) => {
+      if (isMounted && synced) setUsers(synced);
+    });
+    return () => { isMounted = false; };
+  }, []);
+
   const metrics = db.getAdminMetrics();
   const totalCapacityBytes = 500 * 1024 * 1024 * 1024;
   const totalUsedGb = (metrics.storageUsedBytes / (1024 * 1024 * 1024)).toFixed(2);

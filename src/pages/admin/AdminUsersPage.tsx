@@ -71,6 +71,28 @@ export const AdminUsersPage: React.FC = () => {
     setUsers(db.getUsers());
   };
 
+  // Auto sync cloud database when Admin Users Directory page opens
+  React.useEffect(() => {
+    let isMounted = true;
+    db.syncCloudUsers().then((synced) => {
+      if (isMounted && synced) {
+        setUsers(synced);
+      }
+    });
+
+    const handleFocus = () => {
+      db.syncCloudUsers().then((synced) => {
+        if (isMounted && synced) setUsers(synced);
+      });
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, []);
+
   // Add Single User Submit
   const handleAddUserSubmit = (e: React.FormEvent) => {
     e.preventDefault();

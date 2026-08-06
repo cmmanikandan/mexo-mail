@@ -18,9 +18,17 @@ import {
 
 export const AdminDashboardPage: React.FC = () => {
   const { addToast } = useUIStore();
+  const [users, setUsers] = React.useState(db.getUsers());
   const metrics = db.getAdminMetrics();
-  const users = db.getUsers();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    db.syncCloudUsers().then((synced) => {
+      if (isMounted && synced) setUsers(synced);
+    });
+    return () => { isMounted = false; };
+  }, []);
 
   const totalCapacityBytes = 500 * 1024 * 1024 * 1024; // 500 GB
   const usedPercentage = Math.min(

@@ -24,6 +24,12 @@ export const AdminLayout: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 768);
   const [isPhotoUploaderOpen, setIsPhotoUploaderOpen] = useState(false);
 
+  // Auto-sync users and database records from cloud database when Admin Panel opens
+  useEffect(() => {
+    db.syncCloudUsers().catch(() => {});
+    db.syncCloudDatabase().catch(() => {});
+  }, [location.pathname]);
+
   const navSections = [
     {
       title: 'PLATFORM OVERVIEW',
