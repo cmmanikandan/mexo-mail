@@ -44,8 +44,12 @@ export const SignInPage: React.FC = () => {
     setError('');
 
     try {
-      const email = await api.resolveUsernameToEmail(clean);
-      setResolvedEmail(email);
+      const verification = await api.verifyUserExists(clean);
+      if (!verification.exists) {
+        setError("Couldn't find your MEXO Account");
+        return;
+      }
+      setResolvedEmail(verification.email);
       setStep(2);
     } catch {
       setError("Couldn't find your MEXO Account");

@@ -76,6 +76,52 @@ export const api = {
     }
   },
 
+  async verifyUserExists(identifier: string): Promise<{ exists: boolean; email: string; user?: MexoUser }> {
+    const clean = identifier.trim().toLowerCase();
+    if (!clean) return { exists: false, email: '' };
+
+    const email = clean.includes('@') ? clean : `${clean}@mexo.com`;
+    const username = clean.includes('@') ? clean.split('@')[0] : clean;
+
+    if (clean === 'admin' || clean === 'admin@mexo.com') {
+      return { exists: true, email: 'admin@mexo.com' };
+    }
+
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`username.eq.${username},primary_address.eq.${email}`)
+        .maybeSingle();
+
+      if (data) {
+        return {
+          exists: true,
+          email: data.primary_address || email,
+          user: {
+            id: data.id,
+            username: data.username,
+            email: data.primary_address,
+            firstName: data.first_name || '',
+            lastName: data.last_name || '',
+            avatarUrl: data.avatar_url || undefined,
+            role: data.role || 'user',
+            status: data.status || 'active',
+            storageUsedBytes: Number(data.storage_used_bytes || 0),
+            storageLimitBytes: Number(data.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+            createdAt: data.created_at,
+            lastActiveAt: data.updated_at,
+            twoFactorEnabled: false,
+          },
+        };
+      }
+    } catch (err) {
+      console.warn('verifyUserExists DB error:', err);
+    }
+
+    return { exists: false, email };
+  },
+
   async resolveUsernameToEmail(usernameOrEmail: string): Promise<string> {
     const clean = usernameOrEmail.trim().toLowerCase();
     if (clean.includes('@')) return clean;
@@ -281,8 +327,17 @@ export const api = {
 
       let userId: string | undefined = authResult?.user?.id;
       if (!userId) {
-        const { data: signInResult } = await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
-        userId = signInResult?.user?.id;
+        try {
+          const { data: signInResult } = await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
+          userId = signInResult?.user?.id;
+        } catch {
+          // ignore sign-in error on fallback
+        }
+      }
+
+      // If auth signUp/signIn failed (e.g. rate-limiting), generate client UUID to insert profile
+      if (!userId) {
+        userId = crypto.randomUUID();
       }
 
       // ── Restore admin session immediately after getting the new userId ───

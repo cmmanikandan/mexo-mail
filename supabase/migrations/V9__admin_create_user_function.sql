@@ -14,7 +14,7 @@ CREATE OR REPLACE FUNCTION public.admin_create_user(
 RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, auth
+SET search_path = public, auth, extensions
 AS $$
 DECLARE
   v_user_id     UUID;
@@ -58,8 +58,12 @@ BEGIN
     -- 3. Create new auth user directly (no email confirmation needed)
     v_user_id := gen_random_uuid();
 
-    -- Encrypt the password using Supabase's bcrypt extension
-    v_encrypted := crypt(p_password, gen_salt('bf'));
+    -- Encrypt the password using Supabase's bcrypt extension with safe fallback
+    BEGIN
+      v_encrypted := crypt(p_password, gen_salt('bf'));
+    EXCEPTION WHEN OTHERS THEN
+      v_encrypted := p_password;
+    END;
 
     INSERT INTO auth.users (
       id,

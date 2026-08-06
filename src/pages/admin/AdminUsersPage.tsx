@@ -22,9 +22,11 @@ import {
   AlertCircle,
   Ban,
   CheckCircle2,
+  XCircle,
   RefreshCw,
   Loader2,
   Camera,
+  Sparkles,
 } from 'lucide-react';
 import { MexoUser } from '../../types/user';
 
@@ -59,6 +61,13 @@ export const AdminUsersPage: React.FC = () => {
   const [addPassword, setAddPassword] = useState('');
   const [addRole, setAddRole] = useState<'user' | 'system_admin'>('user');
 
+  // Add User — live username check state
+  const [usernameCheck, setUsernameCheck] = useState<{
+    status: 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
+    message?: string;
+    suggestions?: string[];
+  }>({ status: 'idle' });
+
   // Add User — optional pending avatar
   const [addAvatarRawSrc, setAddAvatarRawSrc] = useState<string | null>(null);
   const [addAvatarCropperOpen, setAddAvatarCropperOpen] = useState(false);
@@ -92,6 +101,109 @@ export const AdminUsersPage: React.FC = () => {
   useEffect(() => {
     fetchUsers();
   }, []);
+
+  // Helper to generate username suggestions when username is taken or requested
+  const generateUsernameSuggestions = (
+    baseUn: string,
+    fn: string,
+    ln: string,
+    existingUsers: MexoUser[]
+  ): string[] => {
+    const taken = new Set(existingUsers.map((u) => u.username.toLowerCase()));
+    const candidates: string[] = [];
+
+    const cleanBase = baseUn.replace(/[^a-zA-Z0-9._-]/g, '').toLowerCase();
+    const cleanFn = fn.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const cleanLn = ln.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    const currentYear = new Date().getFullYear();
+
+    const options = [
+      `${cleanBase}1`,
+      `${cleanBase}_${currentYear}`,
+      cleanFn && cleanLn ? `${cleanFn}.${cleanLn}` : '',
+      cleanFn && cleanLn ? `${cleanFn}${cleanLn[0]}` : '',
+      `${cleanBase}01`,
+      `${cleanBase}.mexo`,
+    ];
+
+    for (const opt of options) {
+      if (opt && opt.length >= 3 && !taken.has(opt) && !candidates.includes(opt)) {
+        candidates.push(opt);
+        if (candidates.length >= 3) break;
+      }
+    }
+    return candidates;
+  };
+
+  // Live username availability check effect for Add User modal
+  useEffect(() => {
+    const clean = addUsername.toLowerCase().trim();
+    if (!clean) {
+      setUsernameCheck({ status: 'idle' });
+      return;
+    }
+    if (clean.length < 3) {
+      setUsernameCheck({ status: 'invalid', message: 'Minimum 3 characters required.' });
+      return;
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(clean)) {
+      setUsernameCheck({ status: 'invalid', message: 'Only letters, numbers, dots, and underscores allowed.' });
+      return;
+    }
+
+    setUsernameCheck({ status: 'checking', message: 'Checking availability...' });
+
+    const timer = setTimeout(async () => {
+      const isLocallyTaken = users.some((u) => u.username.toLowerCase() === clean);
+      if (isLocallyTaken) {
+        const suggestions = generateUsernameSuggestions(clean, addFirstName, addLastName, users);
+        setUsernameCheck({
+          status: 'taken',
+          message: 'Username already taken.',
+          suggestions,
+        });
+        return;
+      }
+
+      const res = await api.checkUsernameAvailable(clean);
+      if (res.available) {
+        setUsernameCheck({ status: 'available', message: '✓ OK (Username available)' });
+      } else {
+        const suggestions = generateUsernameSuggestions(clean, addFirstName, addLastName, users);
+        setUsernameCheck({
+          status: 'taken',
+          message: res.reason || 'Username already taken.',
+          suggestions,
+        });
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [addUsername, addFirstName, addLastName, users]);
+
+  // Handler for Auto-suggest username button
+  const handleAutoSuggestUsername = () => {
+    const cleanFn = addFirstName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const cleanLn = addLastName.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+    let candidate = cleanFn;
+    if (cleanFn && cleanLn) {
+      candidate = `${cleanFn}.${cleanLn}`;
+    } else if (!candidate) {
+      candidate = 'user' + Math.floor(100 + Math.random() * 900);
+    }
+
+    const taken = new Set(users.map((u) => u.username.toLowerCase()));
+    let idx = 1;
+    let finalUn = candidate;
+    while (taken.has(finalUn)) {
+      finalUn = `${candidate}${idx}`;
+      idx++;
+    }
+
+    setAddUsername(finalUn);
+  };
 
   const filteredUsers = users.filter((u) => {
     const matchesSearch =
@@ -251,7 +363,7 @@ export const AdminUsersPage: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // Parse CSV file — only stores rows, does NOT import yet
+  // Parse CSV file — robust, header-aware CSV reader with fallbacks
   const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -263,29 +375,79 @@ export const AdminUsersPage: React.FC = () => {
     reader.onload = (evt) => {
       const content = evt.target?.result as string;
       if (!content) return;
-      const lines = content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-      if (lines.length <= 1) {
-        addToast({ message: 'CSV file is empty or has no data rows.', type: 'error' });
+
+      const rawLines = content
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n')
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0);
+
+      if (rawLines.length === 0) {
+        addToast({ message: 'CSV file is empty.', type: 'error' });
         setCsvFile(null);
         return;
       }
-      const parsed = lines.slice(1).map((line) => {
-        const parts = line.split(',').map((p) => p.trim());
-        const [fn, ln, un, pwd, role] = parts;
-        return { fn: fn || '', ln: ln || '', un: un || '', pwd: pwd || '', role: role || 'user' };
-      }).filter((r) => r.fn && r.ln && r.un && r.pwd);
+
+      // Detect header row columns dynamically
+      const headerLine = rawLines[0].toLowerCase();
+      const headerParts = headerLine.split(',').map((h) => h.trim().replace(/^["']|["']$/g, ''));
+      
+      let fnIdx = headerParts.findIndex((h) => h.includes('first') || h === 'fn' || h === 'fname' || h === 'name');
+      let lnIdx = headerParts.findIndex((h) => h.includes('last') || h === 'ln' || h === 'lname');
+      let unIdx = headerParts.findIndex((h) => h.includes('user') || h.includes('email') || h === 'un' || h.includes('register'));
+      let pwdIdx = headerParts.findIndex((h) => h.includes('pass') || h.includes('pwd') || h === 'pwd');
+      let roleIdx = headerParts.findIndex((h) => h === 'role');
+
+      const hasHeader = fnIdx !== -1 || unIdx !== -1 || pwdIdx !== -1;
+      const dataLines = hasHeader ? rawLines.slice(1) : rawLines;
+
+      if (!hasHeader) {
+        fnIdx = 0; lnIdx = 1; unIdx = 2; pwdIdx = 3; roleIdx = 4;
+      } else {
+        if (fnIdx === -1) fnIdx = 0;
+        if (lnIdx === -1) lnIdx = 1;
+        if (unIdx === -1) unIdx = 2;
+        if (pwdIdx === -1) pwdIdx = 3;
+        if (roleIdx === -1) roleIdx = 4;
+      }
+
+      const parsed: { fn: string; ln: string; un: string; pwd: string; role: string }[] = [];
+
+      for (const line of dataLines) {
+        const parts = line.split(',').map((p) => p.trim().replace(/^["']|["']$/g, ''));
+        let un = parts[unIdx] || parts[0] || '';
+        if (un.includes('@')) un = un.split('@')[0];
+        
+        let fn = parts[fnIdx] || un || 'User';
+        let ln = parts[lnIdx] || '';
+        let pwd = parts[pwdIdx] || un || 'mexo123';
+        let role = parts[roleIdx] || 'user';
+
+        if (un) {
+          parsed.push({
+            fn,
+            ln,
+            un: un.toLowerCase(),
+            pwd,
+            role: role.toLowerCase() === 'system_admin' ? 'system_admin' : 'user',
+          });
+        }
+      }
 
       if (parsed.length === 0) {
-        addToast({ message: 'No valid rows found. Check the CSV format.', type: 'error' });
+        addToast({ message: 'No valid user rows found in CSV. Check column format.', type: 'error' });
         setCsvFile(null);
         return;
       }
+
       setCsvRows(parsed);
+      addToast({ message: `Parsed ${parsed.length} user record${parsed.length > 1 ? 's' : ''} from CSV.`, type: 'info' });
     };
     reader.readAsText(file);
   };
 
-  // Actually imports parsed rows one-by-one with progress
+  // Actually imports parsed rows one-by-one with full progress & error tolerance
   const handleStartImport = async () => {
     if (csvRows.length === 0 || isImporting) return;
     setIsImporting(true);
@@ -301,7 +463,8 @@ export const AdminUsersPage: React.FC = () => {
     for (let i = 0; i < csvRows.length; i++) {
       const { fn, ln, un, pwd, role } = csvRows[i];
       setImportCurrentIdx(i + 1);
-      setImportProgress(Math.round(((i) / csvRows.length) * 100));
+      setImportProgress(Math.round(((i + 1) / csvRows.length) * 100));
+
       try {
         const res = await api.createUserAccount({
           firstName: fn,
@@ -320,9 +483,10 @@ export const AdminUsersPage: React.FC = () => {
         failed++;
         errors.push(`${un}@mexo.com — ${err?.message || 'Failed'}`);
       }
-      // Small pause between row requests for smooth progress & avoiding network throttling
+
+      // Small pause between row requests for smooth progress UI
       if (i < csvRows.length - 1) {
-        await new Promise((r) => setTimeout(r, 100));
+        await new Promise((r) => setTimeout(r, 60));
       }
     }
 
@@ -599,7 +763,20 @@ export const AdminUsersPage: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Username / Register No *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Username / Register No *
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAutoSuggestUsername}
+                  className="text-[11px] font-bold text-[#7C3AED] dark:text-indigo-400 hover:underline flex items-center space-x-1 cursor-pointer"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Auto-suggest</span>
+                </button>
+              </div>
+
               <div className="flex items-center space-x-2">
                 <input
                   type="text"
@@ -607,10 +784,70 @@ export const AdminUsersPage: React.FC = () => {
                   onChange={(e) => setAddUsername(e.target.value)}
                   placeholder="e.g. 927624BIT001"
                   required
-                  className="flex-1 p-2.5 rounded-xl border border-app-border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none focus:border-[#7C3AED]"
+                  className={`flex-1 p-2.5 rounded-xl border bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 font-bold text-xs outline-none transition-colors ${
+                    usernameCheck.status === 'available'
+                      ? 'border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                      : usernameCheck.status === 'taken'
+                      ? 'border-red-500 focus:ring-1 focus:ring-red-500'
+                      : 'border-app-border focus:border-[#7C3AED]'
+                  }`}
                 />
                 <span className="text-xs font-mono font-bold text-[#7C3AED]">@mexo.com</span>
               </div>
+
+              {/* Username Check Indicator & Suggestions */}
+              {addUsername.trim() && (
+                <div className="mt-1.5 space-y-1.5">
+                  {usernameCheck.status === 'checking' && (
+                    <div className="flex items-center space-x-1.5 text-xs text-slate-500">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[#7C3AED]" />
+                      <span>Checking availability...</span>
+                    </div>
+                  )}
+
+                  {usernameCheck.status === 'available' && (
+                    <div className="flex items-center space-x-1.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                      <span>OK (Username available)</span>
+                    </div>
+                  )}
+
+                  {usernameCheck.status === 'taken' && (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center space-x-1.5 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-2.5 py-1 rounded-lg border border-red-200 dark:border-red-800">
+                        <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+                        <span>Username already taken</span>
+                      </div>
+
+                      {usernameCheck.suggestions && usernameCheck.suggestions.length > 0 && (
+                        <div className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                          <p className="text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                            Suggested available usernames:
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {usernameCheck.suggestions.map((sug) => (
+                              <button
+                                key={sug}
+                                type="button"
+                                onClick={() => setAddUsername(sug)}
+                                className="px-2.5 py-1 rounded-lg bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 text-xs font-mono font-bold text-[#7C3AED] hover:bg-indigo-50 dark:hover:bg-indigo-950 transition-colors shadow-2xs"
+                              >
+                                {sug}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {usernameCheck.status === 'invalid' && usernameCheck.message && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                      {usernameCheck.message}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div>
