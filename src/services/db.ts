@@ -12,6 +12,8 @@ import {
   RESERVED_USERNAMES,
 } from './mockData';
 
+import { cloudSync } from './cloudSync';
+
 const STORAGE_KEYS = {
   USERS: 'mexo_users_v1',
   MESSAGES: 'mexo_messages_v1',
@@ -121,6 +123,7 @@ class MexoDatabase {
     if (!storedUsers || JSON.parse(storedUsers).length === 0) {
       localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(INITIAL_USERS));
     }
+    this.syncCloudUsers().catch(() => {});
 
     // Messages: seed if missing or empty
     const storedMessages = localStorage.getItem(STORAGE_KEYS.MESSAGES);
@@ -222,6 +225,32 @@ class MexoDatabase {
   }
 
   // --- USER & AUTH APIS ---
+  async syncCloudUsers(): Promise<MexoUser[]> {
+    try {
+      const cloudUsers = await cloudSync.fetchCloudUsers();
+      if (!cloudUsers || cloudUsers.length === 0) return this.getUsers();
+
+      const localUsers = this.getUsers();
+      const userMap = new Map<string, MexoUser>();
+
+      localUsers.forEach((u) => userMap.set(u.id, u));
+      cloudUsers.forEach((u) => {
+        const existing = userMap.get(u.id);
+        if (!existing) {
+          userMap.set(u.id, u);
+        } else {
+          userMap.set(u.id, { ...existing, ...u });
+        }
+      });
+
+      const merged = Array.from(userMap.values());
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(merged));
+      return merged;
+    } catch {
+      return this.getUsers();
+    }
+  }
+
   getUsers(): MexoUser[] {
     return JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
   }
@@ -233,6 +262,13 @@ class MexoDatabase {
   getUserByEmail(email: string): MexoUser | undefined {
     const clean = email.toLowerCase().trim();
     return this.getUsers().find((u) => u.email.toLowerCase() === clean);
+  }
+
+  async getUserByEmailAsync(email: string): Promise<MexoUser | undefined> {
+    const existing = this.getUserByEmail(email);
+    if (existing) return existing;
+    await this.syncCloudUsers();
+    return this.getUserByEmail(email);
   }
 
   getCurrentUser(): MexoUser {
@@ -312,6 +348,7 @@ class MexoDatabase {
     };
     users.push(newUser);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    cloudSync.pushCloudUsers(users).catch(() => {});
     this.setCurrentUser(newUser.id);
     this.sendWelcomeEmail(newUser);
     this.addAuditLog('admin@mexo.com', 'ACCOUNT_CREATED', newUser.email, 'success');
@@ -324,6 +361,7 @@ class MexoDatabase {
     if (idx === -1) return undefined;
     users[idx] = { ...users[idx], ...updates };
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+    cloudSync.pushCloudUsers(users).catch(() => {});
     return users[idx];
   }
 
@@ -345,6 +383,7 @@ class MexoDatabase {
     if (!target) return false;
     const filtered = users.filter((u) => u.id !== id);
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(filtered));
+    cloudSync.pushCloudUsers(filtered).catch(() => {});
     this.addAuditLog('admin@mexo.com', 'ACCOUNT_DELETED', target.email, 'warning');
     return true;
   }

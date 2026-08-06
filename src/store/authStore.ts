@@ -49,7 +49,8 @@ export const useAuthStore = create<AuthStore>((set) => ({
     if (!clean.includes('@')) {
       clean = `${clean}@mexo.com`;
     }
-    const user = db.getUserByEmail(clean);
+    let user = db.getUserByEmail(clean);
+
     if (!user || user.status !== 'active') {
       return false;
     }

@@ -237,6 +237,20 @@ export const AdminUsersPage: React.FC = () => {
 
           <div className="flex items-center space-x-2.5 self-start md:self-auto">
             <button
+              onClick={async () => {
+                addToast({ message: 'Syncing user database across devices...', type: 'info' });
+                await db.syncCloudUsers();
+                refreshUsers();
+                addToast({ message: 'Database successfully synced across devices!', type: 'success' });
+              }}
+              className="px-3.5 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 font-extrabold text-xs flex items-center space-x-2 border border-indigo-200 dark:border-indigo-800 transition-all cursor-pointer"
+              title="Synchronize created accounts across all devices"
+            >
+              <CheckCircle2 className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span>Sync Cloud DB</span>
+            </button>
+
+            <button
               onClick={() => setIsImportModalOpen(true)}
               className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 font-extrabold text-xs flex items-center space-x-2 border border-app-border transition-all cursor-pointer"
             >

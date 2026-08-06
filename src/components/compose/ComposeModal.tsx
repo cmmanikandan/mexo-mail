@@ -24,6 +24,7 @@ import {
   Smile,
   FileText,
   GripHorizontal,
+  ArrowLeft,
 } from 'lucide-react';
 
 export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instance }) => {
@@ -271,17 +272,46 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       style={{
         transform: instance.isMaximized ? 'none' : (window.innerWidth >= 640 ? `translate(${position.x}px, ${position.y}px)` : 'none'),
       }}
-      className={`bg-white dark:bg-slate-900 rounded-none sm:rounded-t-2xl shadow-2xl border-0 sm:border border-slate-200 dark:border-slate-800 flex flex-col overflow-hidden transition-all duration-200 ${
+      className={`bg-white dark:bg-slate-900 shadow-2xl flex flex-col overflow-hidden transition-all duration-200 ${
         instance.isMaximized
-          ? 'fixed inset-0 sm:inset-4 z-[70] rounded-none sm:rounded-2xl'
-          : 'fixed sm:relative inset-0 sm:inset-auto z-[60] sm:z-40 w-full sm:w-[560px] h-[100dvh] sm:h-[580px] max-w-full'
+          ? 'fixed inset-0 z-[100] sm:inset-4 sm:rounded-2xl border-0 sm:border border-slate-200 dark:border-slate-800'
+          : 'fixed sm:relative inset-0 sm:inset-auto z-[100] sm:z-40 w-full sm:w-[560px] h-[100dvh] sm:h-[580px] rounded-none sm:rounded-t-2xl border-0 sm:border border-slate-200 dark:border-slate-800 max-w-full'
       }`}
     >
-      {/* Compose Header Bar (Draggable) */}
+      {/* Mobile Top Navigation Bar (Page header with Back Button) */}
+      <div className="sm:hidden h-14 bg-slate-900 text-white px-3 flex items-center justify-between select-none shrink-0 border-b border-slate-800">
+        <button
+          type="button"
+          onClick={() => closeCompose(instance.id)}
+          className="flex items-center space-x-1 px-2.5 py-1.5 rounded-xl hover:bg-slate-800 text-slate-100 transition-colors font-bold text-xs cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4 text-slate-300" />
+          <span>Back</span>
+        </button>
+
+        <span className="text-sm font-extrabold tracking-tight text-white">Compose</span>
+
+        <div className="flex items-center space-x-2">
+          {instance.isSaving ? (
+            <span className="text-[10px] font-semibold text-indigo-400 animate-pulse">Saving...</span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => closeCompose(instance.id, true)}
+              className="p-1.5 text-slate-400 hover:text-rose-400 cursor-pointer"
+              title="Discard draft"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Desktop Compose Header Bar (Draggable) */}
       <div
         onMouseDown={handleMouseDownHeader}
         onTouchStart={handleTouchStartHeader}
-        className="h-11 bg-slate-900 text-white px-4 flex items-center justify-between select-none cursor-grab active:cursor-grabbing"
+        className="hidden sm:flex h-11 bg-slate-900 text-white px-4 items-center justify-between select-none cursor-grab active:cursor-grabbing shrink-0"
         title="Drag to adjust position on screen"
       >
         <div className="flex items-center space-x-2">

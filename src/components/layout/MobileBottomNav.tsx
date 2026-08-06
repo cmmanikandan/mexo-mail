@@ -11,8 +11,13 @@ export const MobileBottomNav: React.FC = () => {
   const path = location.pathname;
 
   const { currentFolder, setCurrentFolder } = useMailStore();
-  const { openCompose } = useComposeStore();
+  const { openCompose, instances } = useComposeStore();
   const { toggleMobileDrawer } = useUIStore();
+
+  // Hide bottom nav bar on mobile if Compose Page is open
+  if (instances.length > 0) {
+    return null;
+  }
 
   const isFolderActive = (folder: MailFolder) => {
     return path.includes(`/mail/${folder}`) || (currentFolder === folder && path.startsWith('/mail'));

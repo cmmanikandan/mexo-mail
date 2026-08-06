@@ -21,7 +21,7 @@ export const SignInPage: React.FC = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleStep1Next = (e: React.FormEvent) => {
+  const handleStep1Next = async (e: React.FormEvent) => {
     e.preventDefault();
     const clean = usernameInput.trim().toLowerCase();
     if (!clean) {
@@ -30,7 +30,13 @@ export const SignInPage: React.FC = () => {
     }
 
     const fullEmail = clean.includes('@') ? clean : `${clean}@mexo.com`;
-    const user = db.getUserByEmail(fullEmail);
+    setIsLoading(true);
+    let user = db.getUserByEmail(fullEmail);
+
+    if (!user) {
+      user = await db.getUserByEmailAsync(fullEmail);
+    }
+    setIsLoading(false);
 
     if (!user) {
       setError("Couldn't find your MEXO Account");
