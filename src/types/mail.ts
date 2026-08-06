@@ -1,11 +1,17 @@
 export interface Attachment {
   id: string;
+  messageId?: string;
   filename: string;
+  originalFileName?: string;
   mimeType: string;
   sizeBytes: number;
-  cloudinaryPublicId?: string;
+  fileExtension?: string;
+  storagePath?: string;
+  storageKey?: string;
   downloadUrl: string;
   previewUrl?: string;
+  cloudinaryPublicId?: string;
+  uploadedAt?: string;
   isImage?: boolean;
 }
 

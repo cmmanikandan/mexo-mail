@@ -189,7 +189,9 @@ export const INITIAL_MESSAGES: Message[] = [
       {
         id: 'att-1',
         filename: 'MEXO_Groups_Architecture_v2.pdf',
+        originalFileName: 'MEXO_Groups_Architecture_v2.pdf',
         mimeType: 'application/pdf',
+        fileExtension: 'pdf',
         sizeBytes: 2.4 * 1024 * 1024,
         downloadUrl: '#',
         previewUrl: '#',
@@ -253,7 +255,9 @@ export const INITIAL_MESSAGES: Message[] = [
       {
         id: 'att-2',
         filename: 'Project_Schedule_III_IT_A.docx',
+        originalFileName: 'Project_Schedule_III_IT_A.docx',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        fileExtension: 'docx',
         sizeBytes: 1.1 * 1024 * 1024,
         downloadUrl: '#',
       }

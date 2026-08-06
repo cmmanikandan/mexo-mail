@@ -136,28 +136,37 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         setUploadProgress(percent);
       });
 
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
       const newAtt: Attachment = {
         id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         filename: file.name,
+        originalFileName: file.name,
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: res.bytes || file.size,
+        fileExtension: ext,
         downloadUrl: res.secure_url,
         previewUrl: res.secure_url,
+        cloudinaryPublicId: res.public_id,
+        uploadedAt: new Date().toISOString(),
       };
 
       updateCompose(instance.id, {
         attachments: [...instance.attachments, newAtt],
       });
-      addToast({ message: `Attached "${file.name}" to email via Cloudinary`, type: 'success' });
+      addToast({ message: `Attached "${file.name}" via Cloudinary`, type: 'success' });
     } catch (err: any) {
       console.error('Cloudinary upload error:', err);
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
       // Fallback attachment if network upload fails
       const fallbackAtt: Attachment = {
         id: `att-${Date.now()}`,
         filename: file.name,
+        originalFileName: file.name,
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
+        fileExtension: ext,
         downloadUrl: '#',
+        uploadedAt: new Date().toISOString(),
       };
       updateCompose(instance.id, {
         attachments: [...instance.attachments, fallbackAtt],
