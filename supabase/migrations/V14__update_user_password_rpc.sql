@@ -10,7 +10,7 @@ RETURNS JSON
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, auth, extensions
-AS \$\$
+AS $$
 DECLARE
   v_user_id     UUID;
   v_encrypted   TEXT;
@@ -74,7 +74,7 @@ EXCEPTION WHEN OTHERS THEN
     'error',   SQLERRM
   );
 END;
-\$\$;
+$$;
 
 -- Grant execution to authenticated users only
 GRANT EXECUTE ON FUNCTION public.update_user_password TO authenticated;
