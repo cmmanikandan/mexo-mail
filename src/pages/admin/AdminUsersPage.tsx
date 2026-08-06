@@ -3,6 +3,9 @@ import { AdminLayout } from '../../components/layout/AdminLayout';
 import { MexoAvatar } from '../../components/common/MexoAvatar';
 import { MexoBadge } from '../../components/common/MexoBadge';
 import { MexoModal } from '../../components/common/MexoModal';
+import { ProfilePhotoUploader } from '../../components/common/ProfilePhotoUploader';
+import { ImageCropperModal } from '../../components/common/ImageCropperModal';
+import { uploadBlobToCloudinary } from '../../services/cloudinaryService';
 import { db } from '../../services/db';
 import { api } from '../../services/api';
 import { useUIStore } from '../../store/uiStore';
@@ -21,6 +24,7 @@ import {
   CheckCircle2,
   RefreshCw,
   Loader2,
+  Camera,
 } from 'lucide-react';
 import { MexoUser } from '../../types/user';
 
@@ -45,6 +49,16 @@ export const AdminUsersPage: React.FC = () => {
   const [addUsername, setAddUsername] = useState('');
   const [addPassword, setAddPassword] = useState('');
   const [addRole, setAddRole] = useState<'user' | 'system_admin'>('user');
+
+  // Add User — optional pending avatar
+  const [addAvatarRawSrc, setAddAvatarRawSrc] = useState<string | null>(null);
+  const [addAvatarCropperOpen, setAddAvatarCropperOpen] = useState(false);
+  const [addAvatarBlob, setAddAvatarBlob] = useState<Blob | null>(null);
+  const [addAvatarPreviewUrl, setAddAvatarPreviewUrl] = useState<string | null>(null);
+  const addAvatarFileRef = useRef<HTMLInputElement>(null);
+
+  // Admin — edit another user's photo
+  const [photoEditUser, setPhotoEditUser] = useState<MexoUser | null>(null);
 
   // Password Edit State
   const [newPassword, setNewPassword] = useState('');
@@ -80,6 +94,36 @@ export const AdminUsersPage: React.FC = () => {
     return matchesSearch && matchesRole;
   });
 
+  // Add User — handle avatar file select
+  const handleAddAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!validTypes.includes(file.type)) {
+      addToast({ message: 'Choose a JPG, PNG or WebP image.', type: 'error' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      addToast({ message: 'Image must be under 5 MB.', type: 'error' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setAddAvatarRawSrc(reader.result as string);
+      setAddAvatarCropperOpen(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Add User — after crop
+  const handleAddAvatarCrop = (blob: Blob) => {
+    setAddAvatarBlob(blob);
+    setAddAvatarPreviewUrl(URL.createObjectURL(blob));
+    setAddAvatarCropperOpen(false);
+    setAddAvatarRawSrc(null);
+  };
+
   // Add Single User Submit
   const handleAddUserSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,6 +147,19 @@ export const AdminUsersPage: React.FC = () => {
         return;
       }
 
+      // Upload pending avatar blob if one was cropped
+      if (addAvatarBlob && res.user.id) {
+        try {
+          const uploadRes = await uploadBlobToCloudinary(
+            addAvatarBlob,
+            `avatar-${Date.now()}.webp`
+          );
+          await api.updateUserProfile(res.user.id, { avatarUrl: uploadRes.secure_url });
+        } catch (avatarErr) {
+          console.warn('Avatar upload failed for new user, skipping:', avatarErr);
+        }
+      }
+
       await fetchUsers();
       addToast({ message: `User ${res.user.email} created successfully on cloud database!`, type: 'success' });
       setIsAddUserOpen(false);
@@ -112,6 +169,8 @@ export const AdminUsersPage: React.FC = () => {
       setAddLastName('');
       setAddUsername('');
       setAddPassword('');
+      setAddAvatarBlob(null);
+      setAddAvatarPreviewUrl(null);
     } catch (err: any) {
       addToast({ message: err?.message || 'Failed to create user.', type: 'error' });
     } finally {
@@ -355,6 +414,16 @@ export const AdminUsersPage: React.FC = () => {
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end space-x-2">
+                          {/* Change profile photo */}
+                          <button
+                            onClick={() => setPhotoEditUser(u)}
+                            className="p-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer border border-app-border transition-colors"
+                            title="Change profile photo"
+                            aria-label={`Change profile photo for ${u.firstName} ${u.lastName}`}
+                          >
+                            <Camera className="w-3.5 h-3.5" />
+                          </button>
+
                           <button
                             onClick={() => setSelectedUserForPassword(u)}
                             className="px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs inline-flex items-center space-x-1.5 cursor-pointer border border-app-border"
@@ -410,10 +479,49 @@ export const AdminUsersPage: React.FC = () => {
       {isAddUserOpen && (
         <MexoModal
           isOpen={isAddUserOpen}
-          onClose={() => setIsAddUserOpen(false)}
+          onClose={() => { setIsAddUserOpen(false); setAddAvatarBlob(null); setAddAvatarPreviewUrl(null); }}
           title="Create New User Account"
         >
           <form onSubmit={handleAddUserSubmit} className="space-y-4">
+
+            {/* Optional profile photo */}
+            <div className="flex flex-col items-center space-y-2 pb-2">
+              <div
+                className="relative group cursor-pointer"
+                onClick={() => addAvatarFileRef.current?.click()}
+                title="Add profile photo (optional)"
+              >
+                {addAvatarPreviewUrl ? (
+                  <img
+                    src={addAvatarPreviewUrl}
+                    alt="Profile preview"
+                    className="w-16 h-16 rounded-full object-cover border-4 border-white dark:border-slate-800 shadow-xl"
+                  />
+                ) : (
+                  <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 border-2 border-dashed border-slate-300 dark:border-slate-600 flex flex-col items-center justify-center text-slate-400">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="absolute inset-0 rounded-full bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Camera className="w-4 h-4 text-white" />
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => addAvatarFileRef.current?.click()}
+                className="text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
+              >
+                {addAvatarPreviewUrl ? 'Change photo' : '+ Add photo (optional)'}
+              </button>
+              <input
+                ref={addAvatarFileRef}
+                type="file"
+                accept="image/jpeg,image/jpg,image/png,image/webp"
+                onChange={handleAddAvatarFileChange}
+                className="hidden"
+              />
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">First Name *</label>
@@ -482,7 +590,7 @@ export const AdminUsersPage: React.FC = () => {
             <div className="flex justify-end space-x-2 pt-3 border-t border-app-border">
               <button
                 type="button"
-                onClick={() => setIsAddUserOpen(false)}
+                onClick={() => { setIsAddUserOpen(false); setAddAvatarBlob(null); setAddAvatarPreviewUrl(null); }}
                 className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100"
               >
                 Cancel
@@ -497,6 +605,30 @@ export const AdminUsersPage: React.FC = () => {
             </div>
           </form>
         </MexoModal>
+      )}
+
+      {/* Add User avatar cropper */}
+      <ImageCropperModal
+        isOpen={addAvatarCropperOpen}
+        imageSrc={addAvatarRawSrc}
+        onClose={() => { setAddAvatarCropperOpen(false); setAddAvatarRawSrc(null); }}
+        onCrop={handleAddAvatarCrop}
+      />
+
+      {/* Admin — change another user's profile photo */}
+      {photoEditUser && (
+        <ProfilePhotoUploader
+          isOpen={true}
+          onClose={() => setPhotoEditUser(null)}
+          targetUserId={photoEditUser.id}
+          targetUserName={`${photoEditUser.firstName} ${photoEditUser.lastName}`}
+          targetAvatarUrl={photoEditUser.avatarUrl}
+          onAvatarUpdated={(userId, newUrl) => {
+            setUsers((prev) =>
+              prev.map((u) => u.id === userId ? { ...u, avatarUrl: newUrl || undefined } : u)
+            );
+          }}
+        />
       )}
 
       {/* MODAL 2: Import Users via CSV */}

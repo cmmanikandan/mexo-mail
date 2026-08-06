@@ -2,285 +2,260 @@ import React, { useState, useRef } from 'react';
 import { MexoModal } from './MexoModal';
 import { MexoButton } from './MexoButton';
 import { MexoAvatar } from './MexoAvatar';
+import { ImageCropperModal } from './ImageCropperModal';
 import { useAuthStore } from '../../store/authStore';
 import { useUIStore } from '../../store/uiStore';
-import { uploadFileToCloudinary } from '../../services/cloudinaryService';
-import { Camera, Trash2, Upload, AlertCircle, Check, Loader2 } from 'lucide-react';
+import { uploadBlobToCloudinary } from '../../services/cloudinaryService';
+import { api } from '../../services/api';
+import { Camera, Trash2, Upload, AlertCircle, Loader2 } from 'lucide-react';
 
 export interface ProfilePhotoUploaderProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Optional: update a different user's avatar (admin use). Defaults to currentUser. */
+  targetUserId?: string;
+  targetUserName?: string;
+  targetAvatarUrl?: string;
+  /** Called after a successful avatar save for a targetUser (not currentUser) */
+  onAvatarUpdated?: (userId: string, newUrl: string) => void;
 }
 
-export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({ isOpen, onClose }) => {
+export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({
+  isOpen,
+  onClose,
+  targetUserId,
+  targetUserName,
+  targetAvatarUrl,
+  onAvatarUpdated,
+}) => {
   const { currentUser, updateCurrentUser } = useAuthStore();
   const { addToast } = useUIStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [previewSrc, setPreviewSrc] = useState<string | null>(null);
-  const [zoom, setZoom] = useState<number>(1.0);
-  const [error, setError] = useState<string>('');
+  const [rawImageSrc, setRawImageSrc] = useState<string | null>(null);
+  const [isCropperOpen, setIsCropperOpen] = useState(false);
+  const [error, setError] = useState('');
   const [isRemoving, setIsRemoving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Determine whether we're editing currentUser or a target user
+  const isTargetMode = Boolean(targetUserId && targetUserId !== currentUser?.id);
+  const displayAvatarUrl = isTargetMode ? targetAvatarUrl : currentUser?.avatarUrl;
+  const displayName = isTargetMode ? (targetUserName || 'User') : `${currentUser?.firstName || ''} ${currentUser?.lastName || ''}`;
+  const userId = isTargetMode ? targetUserId! : currentUser?.id;
 
   if (!isOpen) return null;
 
+  // ─── File validation ───────────────────────────────────────────────────────
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setError('');
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate size (5 MB max)
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Image file size must be less than 5 MB.');
-      return;
-    }
+    // Reset input so the same file can be re-selected
+    e.target.value = '';
 
-    // Validate file type
     const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
     if (!validTypes.includes(file.type)) {
-      setError('Please select a valid image file (JPG, PNG, or WEBP).');
+      setError('Choose a JPG, PNG or WebP image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('This image is too large. Choose an image under 5 MB.');
       return;
     }
 
-    setSelectedFile(file);
-    setZoom(1.0);
     const reader = new FileReader();
     reader.onload = () => {
-      setPreviewSrc(reader.result as string);
+      setRawImageSrc(reader.result as string);
+      setIsCropperOpen(true);
     };
+    reader.onerror = () => setError('Could not read the image. Please try another file.');
     reader.readAsDataURL(file);
   };
 
-  // Helper to crop image onto square canvas with zoom fit
-  const getCroppedCanvasUrl = (src: string, zoomLevel: number): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const size = 512;
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext('2d');
-
-        if (!ctx) {
-          resolve(src);
-          return;
-        }
-
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, size, size);
-
-        // Draw cropped & zoomed image centered
-        const minDim = Math.min(img.width, img.height);
-        const cropWidth = minDim / zoomLevel;
-        const cropHeight = minDim / zoomLevel;
-        const startX = (img.width - cropWidth) / 2;
-        const startY = (img.height - cropHeight) / 2;
-
-        ctx.drawImage(img, startX, startY, cropWidth, cropHeight, 0, 0, size, size);
-        resolve(canvas.toDataURL('image/jpeg', 0.92));
-      };
-      img.onerror = () => resolve(src);
-      img.src = src;
-    });
-  };
-
-  const handleSavePhoto = async () => {
-    if (!selectedFile && !previewSrc) return;
-
-    setIsUploading(true);
+  // ─── After crop: upload + save ─────────────────────────────────────────────
+  const handleCrop = async (blob: Blob) => {
+    setIsCropperOpen(false);
+    setRawImageSrc(null);
     setError('');
+    setIsUploading(true);
+    setUploadProgress(0);
 
     try {
-      let finalAvatarUrl = previewSrc || currentUser.avatarUrl;
-      if (previewSrc) {
-        finalAvatarUrl = await getCroppedCanvasUrl(previewSrc, zoom);
+      const filename = `avatar-${Date.now()}.webp`;
+      const result = await uploadBlobToCloudinary(blob, filename, (pct) => {
+        setUploadProgress(pct);
+      });
+
+      const newAvatarUrl = result.secure_url;
+
+      if (isTargetMode) {
+        // Admin updating another user's photo
+        await api.updateUserProfile(userId!, { avatarUrl: newAvatarUrl });
+        onAvatarUpdated?.(userId!, newAvatarUrl);
+        addToast({ message: 'Profile photo updated successfully.', type: 'success' });
+      } else {
+        // User updating their own photo
+        await updateCurrentUser({ avatarUrl: newAvatarUrl });
+        addToast({ message: 'Profile photo saved!', type: 'success' });
       }
 
-      if (selectedFile) {
-        // Create cropped file from canvas
-        const cloudinaryRes = await uploadFileToCloudinary(selectedFile);
-        updateCurrentUser({ avatarUrl: cloudinaryRes.secure_url || finalAvatarUrl });
-        addToast({ message: 'Profile photo uploaded successfully!', type: 'success' });
-      } else if (finalAvatarUrl) {
-        updateCurrentUser({ avatarUrl: finalAvatarUrl });
-        addToast({ message: 'Profile photo updated successfully.', type: 'success' });
-      }
       onClose();
     } catch (err: any) {
-      console.error('Failed to upload profile photo:', err);
-      if (previewSrc) {
-        const croppedUrl = await getCroppedCanvasUrl(previewSrc, zoom);
-        updateCurrentUser({ avatarUrl: croppedUrl });
-        addToast({ message: 'Profile photo updated locally.', type: 'info' });
-        onClose();
-      } else {
-        setError('Failed to upload image. Please try again.');
-      }
+      console.error('Avatar upload failed:', err);
+      setError('Couldn\'t update profile photo. Please try again.');
+      addToast({ message: 'Failed to upload photo.', type: 'error' });
     } finally {
       setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
-  const handleConfirmRemove = () => {
-    updateCurrentUser({ avatarUrl: undefined });
-    addToast({ message: 'Profile photo removed. User initials will be displayed.', type: 'info' });
-    setIsRemoving(false);
-    onClose();
+  // ─── Remove photo ──────────────────────────────────────────────────────────
+  const handleConfirmRemove = async () => {
+    try {
+      if (isTargetMode) {
+        await api.updateUserProfile(userId!, { avatarUrl: undefined });
+        onAvatarUpdated?.(userId!, '');
+      } else {
+        await updateCurrentUser({ avatarUrl: undefined });
+      }
+      addToast({ message: 'Profile photo removed.', type: 'info' });
+    } catch {
+      addToast({ message: 'Failed to remove photo.', type: 'error' });
+    } finally {
+      setIsRemoving(false);
+      onClose();
+    }
   };
 
   return (
-    <MexoModal isOpen={isOpen} onClose={onClose} title="Profile Photo & Crop" maxWidth="sm">
-      <div className="space-y-6 select-none">
-        {error && (
-          <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center">
-            <AlertCircle className="w-4 h-4 mr-2 flex-shrink-0" />
-            <span>{error}</span>
-          </div>
-        )}
+    <>
+      {/* Main "Profile photo" options dialog */}
+      <MexoModal isOpen={isOpen} onClose={onClose} title="Profile Photo" maxWidth="sm">
+        <div className="space-y-5 select-none">
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 text-xs font-semibold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        {/* Circular Avatar Preview with Ambient Blurred Background Circle */}
-        <div className="flex flex-col items-center justify-center space-y-4 pt-2">
-          <div className="relative group cursor-pointer flex items-center justify-center" onClick={() => fileInputRef.current?.click()}>
-            {/* Ambient Blurred Circle Glow behind image to fit preview */}
-            <div className="absolute w-36 h-36 rounded-full bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] opacity-60 blur-xl scale-125 transition-all duration-300 pointer-events-none" />
-
-            {/* Main Avatar Container */}
-            <div className="relative w-32 h-32 rounded-full overflow-hidden border-4 border-white dark:border-slate-800 shadow-2xl flex items-center justify-center bg-slate-900">
-              {previewSrc || currentUser.avatarUrl ? (
-                <img
-                  src={previewSrc || currentUser.avatarUrl}
-                  alt="Profile Preview"
-                  style={{ transform: `scale(${zoom})` }}
-                  className="w-full h-full object-cover transition-transform duration-100 ease-out"
-                />
-              ) : (
-                <MexoAvatar
-                  name={`${currentUser.firstName} ${currentUser.lastName}`}
-                  size="xl"
-                  className="w-full h-full text-3xl"
-                />
+          {/* Current avatar preview */}
+          <div className="flex flex-col items-center space-y-3 py-2">
+            <div className="relative">
+              <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] opacity-40 blur-xl scale-110 pointer-events-none" />
+              <MexoAvatar
+                name={displayName}
+                src={displayAvatarUrl}
+                size="xl"
+                className="w-24 h-24 text-3xl shadow-2xl border-4 border-white dark:border-slate-800 relative"
+              />
+            </div>
+            <div className="text-center">
+              <p className="font-extrabold text-sm text-slate-900 dark:text-slate-100">{displayName.trim() || 'User'}</p>
+              {!isTargetMode && (
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-0.5">{currentUser?.email}</p>
               )}
-              <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center text-white">
-                <Camera className="w-7 h-7 mb-1" />
-                <span className="text-[10px] font-bold">Change Photo</span>
+            </div>
+          </div>
+
+          {/* Upload progress bar */}
+          {isUploading && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-500" />
+                  Saving profile photo...
+                </span>
+                <span className="font-mono text-indigo-500">{uploadProgress}%</span>
+              </div>
+              <div className="h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-[#7C3AED] to-[#0878e8] rounded-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
               </div>
             </div>
-          </div>
+          )}
 
-          <p className="text-xs text-app-muted font-semibold">
-            {previewSrc ? 'Adjust crop zoom below to fit your photo' : 'Click avatar or upload button to select image'}
-          </p>
-        </div>
-
-        {/* Crop & Zoom Adjustment Controls */}
-        {previewSrc && (
-          <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-app-border space-y-2.5">
-            <div className="flex items-center justify-between text-xs font-bold text-app-heading">
-              <span>Fit & Crop Zoom</span>
-              <span className="font-mono text-app-primary">{Math.round(zoom * 100)}%</span>
+          {/* Removal confirmation */}
+          {isRemoving ? (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 space-y-3">
+              <p className="font-bold text-xs text-rose-800 dark:text-rose-200">Remove profile photo?</p>
+              <p className="text-xs text-rose-700 dark:text-rose-300">
+                Your initials will be shown instead across MEXO services.
+              </p>
+              <div className="flex justify-end space-x-2">
+                <MexoButton variant="secondary" size="sm" onClick={() => setIsRemoving(false)}>
+                  Cancel
+                </MexoButton>
+                <MexoButton variant="danger" size="sm" onClick={handleConfirmRemove}>
+                  Remove
+                </MexoButton>
+              </div>
             </div>
-            <div className="flex items-center space-x-3">
+          ) : (
+            <div className="space-y-2">
+              {/* Upload new photo */}
               <button
                 type="button"
-                onClick={() => setZoom(Math.max(1.0, zoom - 0.1))}
-                className="p-1.5 rounded-lg border border-app-border bg-white dark:bg-slate-900 text-app-heading hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                title="Zoom out"
-              >
-                <span className="text-xs font-bold font-mono">−</span>
-              </button>
-              <input
-                type="range"
-                min="1.0"
-                max="2.5"
-                step="0.05"
-                value={zoom}
-                onChange={(e) => setZoom(parseFloat(e.target.value))}
-                className="flex-1 accent-app-primary cursor-pointer h-1.5 bg-slate-200 dark:bg-slate-700 rounded-lg"
-              />
-              <button
-                type="button"
-                onClick={() => setZoom(Math.min(2.5, zoom + 0.1))}
-                className="p-1.5 rounded-lg border border-app-border bg-white dark:bg-slate-900 text-app-heading hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                title="Zoom in"
-              >
-                <span className="text-xs font-bold font-mono">+</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Hidden File Input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/png, image/jpeg, image/jpg, image/webp"
-          onChange={handleFileChange}
-          className="hidden"
-        />
-
-        {/* Removal Confirmation Dialog View */}
-        {isRemoving ? (
-          <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900 space-y-3 text-xs">
-            <h4 className="font-bold text-rose-800 dark:text-rose-200">Remove profile photo?</h4>
-            <p className="text-rose-700 dark:text-rose-300">
-              Your profile picture will be deleted and your initials will be displayed across MEXO services instead.
-            </p>
-            <div className="flex justify-end space-x-2 pt-2">
-              <MexoButton variant="secondary" size="sm" onClick={() => setIsRemoving(false)}>
-                Cancel
-              </MexoButton>
-              <MexoButton variant="danger" size="sm" onClick={handleConfirmRemove}>
-                Remove Photo
-              </MexoButton>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center space-x-2">
-              <MexoButton
-                type="button"
-                variant="outline"
-                className="flex-1"
                 onClick={() => fileInputRef.current?.click()}
-                leftIcon={<Upload className="w-4 h-4" />}
+                disabled={isUploading}
+                className="w-full flex items-center justify-center space-x-2.5 py-3 px-4 rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-950/30 transition-all font-bold text-sm disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                aria-label="Upload new profile photo"
               >
-                Upload New Photo
-              </MexoButton>
+                <Upload className="w-4.5 h-4.5 text-indigo-500" />
+                <span>{displayAvatarUrl ? 'Change photo' : 'Upload photo'}</span>
+              </button>
 
-              {currentUser.avatarUrl && (
+              {/* Remove existing photo */}
+              {displayAvatarUrl && (
                 <button
                   type="button"
                   onClick={() => setIsRemoving(true)}
-                  className="p-2.5 rounded-xl border border-app-border hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 transition-colors"
-                  title="Remove Profile Photo"
+                  disabled={isUploading}
+                  className="w-full flex items-center justify-center space-x-2 py-2.5 px-4 rounded-2xl border border-app-border hover:bg-rose-50 dark:hover:bg-rose-950/30 text-rose-600 dark:text-rose-400 transition-colors font-semibold text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  aria-label="Remove profile photo"
                 >
-                  <Trash2 className="w-4 h-4" />
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Remove photo</span>
                 </button>
               )}
-            </div>
 
-            <div className="flex justify-end space-x-2 pt-3 border-t border-app-border">
-              <MexoButton variant="secondary" onClick={onClose}>
-                Cancel
-              </MexoButton>
-              {previewSrc && (
-                <MexoButton
-                  variant="primary"
-                  onClick={handleSavePhoto}
-                  disabled={isUploading}
-                  leftIcon={isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                >
-                  {isUploading ? 'Uploading...' : 'Save Photo'}
+              {/* Cancel */}
+              <div className="flex justify-end pt-2 border-t border-app-border">
+                <MexoButton variant="secondary" onClick={onClose} disabled={isUploading}>
+                  Cancel
                 </MexoButton>
-              )}
+              </div>
             </div>
-          </div>
-        )}
-      </div>
-    </MexoModal>
+          )}
+
+          {/* Hidden file input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png,image/webp"
+            onChange={handleFileChange}
+            className="hidden"
+            aria-label="Select profile photo file"
+          />
+        </div>
+      </MexoModal>
+
+      {/* Crop modal — only renders when an image has been selected */}
+      <ImageCropperModal
+        isOpen={isCropperOpen}
+        imageSrc={rawImageSrc}
+        onClose={() => {
+          setIsCropperOpen(false);
+          setRawImageSrc(null);
+        }}
+        onCrop={handleCrop}
+      />
+    </>
   );
 };

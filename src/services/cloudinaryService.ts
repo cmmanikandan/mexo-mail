@@ -123,3 +123,17 @@ export const uploadFileToCloudinary = async (
     return await executeUpload(autoEndpoint);
   }
 };
+
+/**
+ * Uploads a pre-cropped Blob (e.g. from canvas.toBlob) directly to Cloudinary.
+ * Use this for avatar uploads — avoids sending the large raw original.
+ */
+export const uploadBlobToCloudinary = async (
+  blob: Blob,
+  filename: string,
+  onProgress?: (percent: number) => void
+): Promise<CloudinaryUploadResult> => {
+  const file = new File([blob], filename, { type: blob.type || 'image/webp' });
+  return uploadFileToCloudinary(file, onProgress);
+};
+
