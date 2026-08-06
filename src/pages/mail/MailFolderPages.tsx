@@ -23,17 +23,22 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
 
   const activeFolder = folderOverride || (paramFolder as MailFolder) || currentFolder || 'inbox';
   const effectiveQuery = urlQuery || searchQuery;
+  const [isLoading, setIsLoading] = React.useState(true);
 
   const isMobileSearchRoute = activeFolder === 'search' && typeof window !== 'undefined' && window.innerWidth < 768;
 
   // Asynchronously fetch messages and drafts from Supabase database on mount/refresh
   React.useEffect(() => {
     if (currentUser?.id && currentUser.id !== 'guest-user') {
+      setIsLoading(true);
       Promise.all([
         db.fetchMessagesForUser(currentUser.id),
         db.fetchDraftsForUser(currentUser.id),
       ]).then(() => {
         triggerRefresh();
+        setIsLoading(false);
+      }).catch(() => {
+        setIsLoading(false);
       });
 
       // Connect Realtime subscription
@@ -151,7 +156,7 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
     <AppLayout>
       <div key={activeFolder} className="flex-1 flex flex-col min-h-0 animate-in fade-in slide-in-from-right-1 duration-200">
         {(activeFolder === 'search' || Boolean(effectiveQuery.trim())) && <SearchFilterChips />}
-        <MailList messages={filteredMessages} />
+        <MailList messages={filteredMessages} isLoading={isLoading} />
       </div>
     </AppLayout>
   );

@@ -75,9 +75,19 @@ export const MailRow: React.FC<MailRowProps> = ({ message, isSelected }) => {
     return firstRecip.split('@')[0];
   }, [message.recipients]);
 
+  // Recipient avatar resolution for Sent folder
+  const recipientAvatar = React.useMemo(() => {
+    if (!message.recipients || message.recipients.length === 0) return undefined;
+    const firstRecip = message.recipients[0].toLowerCase().trim();
+    const recipUser = db.getUserByEmail(firstRecip);
+    if (recipUser?.avatarUrl) return recipUser.avatarUrl;
+    const foundContact = db.getContacts().find((c) => c.email.toLowerCase() === firstRecip);
+    return foundContact?.avatarUrl;
+  }, [message.recipients]);
+
   const displayName = isSentFolder ? `To: ${recipientName}` : message.senderName;
-  const avatarName = isSentFolder ? `${currentUser?.firstName || ''} ${currentUser?.lastName || ''}` : message.senderName;
-  const avatarSrc = isSentFolder ? currentUser?.avatarUrl : senderAvatar;
+  const avatarName = isSentFolder ? recipientName : message.senderName;
+  const avatarSrc = isSentFolder ? recipientAvatar : senderAvatar;
 
   const handleRowClick = (e: React.MouseEvent) => {
     const targetTag = (e.target as HTMLElement).tagName.toLowerCase();

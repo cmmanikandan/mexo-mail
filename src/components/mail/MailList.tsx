@@ -2,18 +2,30 @@ import React from 'react';
 import { Message } from '../../types/mail';
 import { MailRow } from './MailRow';
 import { MailToolbar } from './MailToolbar';
+import { MailSkeletonLoader } from '../common/MailSkeletonLoader';
 import { MexoEmptyState } from '../common/MexoEmptyState';
 import { useMailStore } from '../../store/mailStore';
-import { db } from '../../services/db';
 
 export interface MailListProps {
   messages: Message[];
+  isLoading?: boolean;
 }
 
-export const MailList: React.FC<MailListProps> = ({ messages }) => {
+export const MailList: React.FC<MailListProps> = ({ messages, isLoading = false }) => {
   const { selectedMessageIds, currentFolder } = useMailStore();
 
   const visibleIds = messages.map((m) => m.id);
+
+  if (isLoading) {
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-slate-900">
+        <MailToolbar totalCount={0} allVisibleIds={[]} />
+        <div className="flex-1 overflow-y-auto pb-mobile-nav">
+          <MailSkeletonLoader count={8} />
+        </div>
+      </div>
+    );
+  }
 
   if (messages.length === 0) {
     return (
