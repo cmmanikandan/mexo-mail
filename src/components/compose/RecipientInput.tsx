@@ -104,7 +104,9 @@ export const RecipientInput: React.FC<RecipientInputProps> = ({
   const addRecipient = (emailToAdd: string) => {
     let clean = emailToAdd.toLowerCase().trim();
     if (!clean) return;
+    clean = clean.replace(/(@mexo\.com)+$/gi, '@mexo.com');
     if (!clean.includes('@')) clean = `${clean}@mexo.com`;
+    clean = clean.replace(/@mexo\.com@mexo\.com/g, '@mexo.com');
     if (!recipients.includes(clean)) {
       onChangeRecipients([...recipients, clean]);
     }
