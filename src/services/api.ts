@@ -165,7 +165,78 @@ export const api = {
       const primaryEmail = `${cleanUsername}@mexo.com`;
       const pwd = userData.password || cleanUsername;
 
-      // Step 0: Check if profile already exists in DB (fast path for re-imports)
+      // Use the SECURITY DEFINER database function which:
+      // 1. Creates auth.users entry directly (no email confirmation required)
+      // 2. Inserts the profile linked to that auth user
+      // 3. Handles re-imports gracefully (upsert on existing users)
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('admin_create_user', {
+        p_email:      primaryEmail,
+        p_password:   pwd,
+        p_first_name: userData.firstName,
+        p_last_name:  userData.lastName,
+        p_username:   cleanUsername,
+        p_role:       userData.role || 'user',
+      });
+
+      if (rpcError) {
+        console.error('admin_create_user RPC error:', rpcError);
+        // Fallback: try client-side signUp path for compatibility
+        return await this._createUserClientSide(userData);
+      }
+
+      const result = rpcResult as any;
+
+      if (!result?.success) {
+        const errMsg = result?.error || 'Failed to create user via database function.';
+        console.warn('admin_create_user returned failure:', errMsg);
+        // Fallback to client-side path
+        return await this._createUserClientSide(userData);
+      }
+
+      const profile = result.profile;
+      if (!profile) {
+        return { user: null, error: 'No profile returned from create function.' };
+      }
+
+      const createdUser: MexoUser = {
+        id: profile.id,
+        username: profile.username,
+        email: profile.primary_address,
+        firstName: profile.first_name || '',
+        lastName: profile.last_name || '',
+        avatarUrl: profile.avatar_url || undefined,
+        role: profile.role || 'user',
+        status: profile.status || 'active',
+        storageUsedBytes: Number(profile.storage_used_bytes || 0),
+        storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+        createdAt: profile.created_at,
+        lastActiveAt: profile.updated_at,
+        twoFactorEnabled: false,
+      };
+
+      await this.addAuditLog('admin@mexo.com', 'ACCOUNT_CREATED', primaryEmail, 'success');
+      return { user: createdUser, error: null };
+
+    } catch (err: any) {
+      console.error('createUserAccount failed:', err);
+      return { user: null, error: err?.message || 'Failed to create user account.' };
+    }
+  },
+
+  // Fallback: client-side user creation (used when RPC is unavailable)
+  async _createUserClientSide(userData: {
+    firstName: string;
+    lastName: string;
+    username: string;
+    password?: string;
+    role?: string;
+  }): Promise<{ user: MexoUser | null; error: string | null }> {
+    try {
+      const cleanUsername = userData.username.toLowerCase().trim();
+      const primaryEmail = `${cleanUsername}@mexo.com`;
+      const pwd = userData.password || cleanUsername;
+
+      // Check if profile already exists in DB
       const { data: existingProfile } = await supabase
         .from('profiles')
         .select('*')
@@ -173,125 +244,89 @@ export const api = {
         .maybeSingle();
 
       if (existingProfile) {
-        // Profile already exists — update fields and return
-        const { data: updated } = await supabase
-          .from('profiles')
-          .update({
-            first_name: userData.firstName,
-            last_name: userData.lastName,
-            role: userData.role || existingProfile.role || 'user',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', existingProfile.id)
-          .select()
-          .single();
-
-        const profile = updated || existingProfile;
         return {
           user: {
-            id: profile.id,
-            username: profile.username,
-            email: profile.primary_address,
-            firstName: profile.first_name || '',
-            lastName: profile.last_name || '',
-            avatarUrl: profile.avatar_url || undefined,
-            role: profile.role || 'user',
+            id: existingProfile.id,
+            username: existingProfile.username,
+            email: existingProfile.primary_address,
+            firstName: existingProfile.first_name || '',
+            lastName: existingProfile.last_name || '',
+            avatarUrl: existingProfile.avatar_url || undefined,
+            role: existingProfile.role || 'user',
             status: 'active',
-            storageUsedBytes: Number(profile.storage_used_bytes || 0),
-            storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
-            createdAt: profile.created_at,
-            lastActiveAt: profile.updated_at,
+            storageUsedBytes: Number(existingProfile.storage_used_bytes || 0),
+            storageLimitBytes: Number(existingProfile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+            createdAt: existingProfile.created_at,
+            lastActiveAt: existingProfile.updated_at,
             twoFactorEnabled: false,
           },
           error: null,
         };
       }
 
-      // Step 1: Create auth user via signUp
       const { data: authResult, error: authError } = await supabase.auth.signUp({
         email: primaryEmail,
         password: pwd,
         options: {
-          data: {
-            username: cleanUsername,
-            first_name: userData.firstName,
-            last_name: userData.lastName,
-          },
+          data: { username: cleanUsername, first_name: userData.firstName, last_name: userData.lastName },
         },
       });
 
-      // Get the auth user ID — signUp returns the user object even for unconfirmed users
       let userId: string | undefined = authResult?.user?.id;
-
       if (!userId) {
-        // signUp failed — likely "User already registered" in auth but no profile yet.
-        // Try signing in to retrieve the existing auth user's ID.
-        const { data: signInResult } = await supabase.auth.signInWithPassword({
-          email: primaryEmail,
-          password: pwd,
-        });
+        const { data: signInResult } = await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
         userId = signInResult?.user?.id;
       }
-
-      // If we still have no valid auth user ID, we cannot create the profile
-      // because profiles.id has a FK constraint to auth.users.id.
       if (!userId) {
-        const errMsg = authError?.message || 'Could not obtain a valid Auth user ID. Account may require email confirmation.';
-        return { user: null, error: errMsg };
+        return { user: null, error: authError?.message || 'Could not obtain Auth user ID.' };
       }
 
-      // Step 2: Insert profile with the verified auth user ID
-      const profileData = {
-        id: userId,
-        username: cleanUsername,
-        primary_address: primaryEmail,
-        first_name: userData.firstName,
-        last_name: userData.lastName,
-        avatar_url: userData.avatarUrl || null,
-        role: userData.role || 'user',
-        status: 'active',
-        storage_used_bytes: 0,
-        storage_limit_bytes: 15 * 1024 * 1024 * 1024,
-      };
-
-      const { data: insertedProfile, error: profError } = await supabase
+      const { data: profile, error: profError } = await supabase
         .from('profiles')
-        .upsert(profileData, { onConflict: 'id' })
+        .upsert({
+          id: userId,
+          username: cleanUsername,
+          primary_address: primaryEmail,
+          first_name: userData.firstName,
+          last_name: userData.lastName,
+          role: userData.role || 'user',
+          status: 'active',
+          storage_used_bytes: 0,
+          storage_limit_bytes: 15 * 1024 * 1024 * 1024,
+        }, { onConflict: 'id' })
         .select()
         .single();
 
-      if (profError) {
-        console.error('Error creating profile:', profError);
-        return { user: null, error: profError.message };
+      if (profError || !profile) {
+        return { user: null, error: profError?.message || 'Failed to create profile.' };
       }
 
-      const createdUser: MexoUser = {
-        id: insertedProfile.id,
-        username: insertedProfile.username,
-        email: insertedProfile.primary_address,
-        firstName: insertedProfile.first_name || '',
-        lastName: insertedProfile.last_name || '',
-        avatarUrl: insertedProfile.avatar_url || undefined,
-        role: insertedProfile.role || 'user',
-        status: 'active',
-        storageUsedBytes: Number(insertedProfile.storage_used_bytes || 0),
-        storageLimitBytes: Number(insertedProfile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
-        createdAt: insertedProfile.created_at,
-        lastActiveAt: insertedProfile.updated_at,
-        twoFactorEnabled: false,
+      return {
+        user: {
+          id: profile.id,
+          username: profile.username,
+          email: profile.primary_address,
+          firstName: profile.first_name || '',
+          lastName: profile.last_name || '',
+          avatarUrl: profile.avatar_url || undefined,
+          role: profile.role || 'user',
+          status: 'active',
+          storageUsedBytes: Number(profile.storage_used_bytes || 0),
+          storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+          createdAt: profile.created_at,
+          lastActiveAt: profile.updated_at,
+          twoFactorEnabled: false,
+        },
+        error: null,
       };
-
-      await this.addAuditLog('admin@mexo.com', 'ACCOUNT_CREATED', primaryEmail, 'success');
-
-      return { user: createdUser, error: null };
     } catch (err: any) {
-      console.error('createUserAccount failed:', err);
       return { user: null, error: err?.message || 'Failed to create user account.' };
     }
   },
 
 
   async updateUserProfile(userId: string, updates: Partial<MexoUser>): Promise<MexoUser | null> {
+
     try {
       const dbUpdates: any = {};
       if (updates.firstName !== undefined) dbUpdates.first_name = updates.firstName;
