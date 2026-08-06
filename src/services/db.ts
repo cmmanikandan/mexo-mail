@@ -212,35 +212,26 @@ class MexoDatabase {
 
   // --- MESSAGES ---
   async fetchMessagesForUser(userId: string): Promise<Message[]> {
-    const msgs = await api.getMessagesForUser(userId);
-    if (msgs && msgs.length > 0) {
-      // Merge with existing local messages deduplicated
-      const msgMap = new Map<string, Message>();
-      this.cachedMessages.forEach((m) => msgMap.set(m.id, m));
-      msgs.forEach((m) => msgMap.set(m.id, m));
-      this.cachedMessages = Array.from(msgMap.values());
-      this.saveMessagesToStorage();
+    if (!userId || userId === 'guest-user') return this.cachedMessages;
+    try {
+      const msgs = await api.getMessagesForUser(userId);
+      this.cachedMessages = msgs || [];
+      return this.cachedMessages;
+    } catch (err) {
+      console.error('Error fetching messages in db:', err);
+      return this.cachedMessages;
     }
-    return this.cachedMessages;
   }
 
   getMessages(): Message[] {
-    const stored = this.loadMessagesFromStorage();
-    if (stored.length > 0) {
-      this.cachedMessages = stored;
-    }
     return this.cachedMessages;
   }
 
   getMessagesForUser(userEmail: string): Message[] {
     const clean = userEmail.toLowerCase().trim();
+    if (!clean) return this.cachedMessages;
     const cleanUsername = clean.includes('@') ? clean.split('@')[0] : clean;
     const fullEmail = clean.includes('@') ? clean : `${clean}@mexo.com`;
-
-    const stored = this.loadMessagesFromStorage();
-    if (stored.length > 0) {
-      this.cachedMessages = stored;
-    }
 
     return this.cachedMessages.filter((m) => {
       const recip = m.userState?.recipientEmail?.toLowerCase().trim() || '';
@@ -266,93 +257,14 @@ class MexoDatabase {
     bodyHtml: string;
     attachments?: any[];
     clientMessageId?: string;
-  }): Promise<boolean> {
-    const cleanSender = params.senderEmail.toLowerCase().trim();
-    const messageId = params.clientMessageId || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const threadId = `th-${messageId}`;
-    const createdAt = new Date().toISOString();
-    const snippet = params.bodyHtml ? params.bodyHtml.replace(/<[^>]*>?/gm, '').slice(0, 120) : '(No content)';
-
-    const cleanRecipients = params.recipients.map((r) => {
-      let clean = r.toLowerCase().trim();
-      if (!clean.includes('@')) clean = `${clean}@mexo.com`;
-      return clean;
-    });
-
-    // Make sure we have latest stored messages
-    this.cachedMessages = this.loadMessagesFromStorage();
-
-    // 1. Sent folder message for Sender
-    const senderMsg: Message = {
-      id: `${messageId}-sent`,
-      threadId,
-      senderName: params.senderName,
-      senderEmail: cleanSender,
-      recipients: cleanRecipients,
-      subject: params.subject || '(No Subject)',
-      snippet,
-      bodyHtml: params.bodyHtml,
-      attachments: params.attachments || [],
-      createdAt,
-      userState: {
-        recipientEmail: cleanSender,
-        isRead: true,
-        isStarred: false,
-        isImportant: false,
-        isArchived: false,
-        isDeleted: false,
-        isSpam: false,
-        labels: [],
-      },
-    };
-
-    this.cachedMessages.unshift(senderMsg);
-
-    // 2. Inbox folder message for EACH Recipient
-    cleanRecipients.forEach((recipEmail) => {
-      const recipMsg: Message = {
-        id: `${messageId}-inbox-${recipEmail}`,
-        threadId,
-        senderName: params.senderName,
-        senderEmail: cleanSender,
-        recipients: cleanRecipients,
-        subject: params.subject || '(No Subject)',
-        snippet,
-        bodyHtml: params.bodyHtml,
-        attachments: params.attachments || [],
-        createdAt,
-        userState: {
-          recipientEmail: recipEmail,
-          isRead: false,
-          isStarred: false,
-          isImportant: false,
-          isArchived: false,
-          isDeleted: false,
-          isSpam: false,
-          labels: [],
-        },
-      };
-
-      this.cachedMessages.unshift(recipMsg);
-    });
-
-    // Save to local storage immediately so it persists across reloads & tabs
-    this.saveMessagesToStorage();
-
-    // Sync with Cloud DB asynchronously
-    const senderId = params.senderUserId || 'system-user';
-    api.sendMessage({
-      senderUserId: senderId,
-      senderEmail: cleanSender,
-      senderName: params.senderName,
-      recipients: cleanRecipients,
-      subject: params.subject,
-      bodyHtml: params.bodyHtml,
-      attachments: params.attachments,
-      clientMessageId: messageId,
-    }).catch((err) => console.warn('Cloud message sync error:', err));
-
-    return true;
+    draftId?: string;
+  }): Promise<{ success: boolean; error?: string; messageId?: string }> {
+    const res = await api.sendMessage(params);
+    if (res.success && params.senderUserId) {
+      // Refresh messages for sender from central DB
+      await this.fetchMessagesForUser(params.senderUserId);
+    }
+    return res;
   }
 
   async updateMessageState(stateId: string, updates: any): Promise<boolean> {
@@ -365,60 +277,38 @@ class MexoDatabase {
           ...updates,
         },
       };
-      this.saveMessagesToStorage();
     }
-    api.updateMessageState(stateId, updates).catch(() => {});
-    return true;
+    return api.updateMessageState(stateId, updates);
   }
 
   async deleteMessagePermanently(stateId: string): Promise<boolean> {
     this.cachedMessages = this.cachedMessages.filter((m) => m.id !== stateId);
-    this.saveMessagesToStorage();
-    api.deleteMessageState(stateId).catch(() => {});
-    return true;
+    return api.deleteMessageState(stateId);
   }
 
   // --- DRAFTS ---
-  private loadDraftsFromStorage(): Draft[] {
-    try {
-      const raw = localStorage.getItem('mexo_cached_drafts');
-      if (raw) return JSON.parse(raw);
-    } catch {}
-    return [];
-  }
-
-  private saveDraftsToStorage(): void {
-    try {
-      localStorage.setItem('mexo_cached_drafts', JSON.stringify(this.cachedDrafts));
-    } catch {}
-  }
-
   getDrafts(): Draft[] {
-    const stored = this.loadDraftsFromStorage();
-    if (stored.length > 0) this.cachedDrafts = stored;
     return this.cachedDrafts;
   }
 
   getDraftsForUser(userEmail: string): Draft[] {
     const clean = userEmail.toLowerCase().trim();
-    const stored = this.loadDraftsFromStorage();
-    if (stored.length > 0) this.cachedDrafts = stored;
-
+    if (!clean) return this.cachedDrafts;
     return this.cachedDrafts.filter(
       (d) => !d.userEmail || d.userEmail.toLowerCase() === clean
     );
   }
 
   async fetchDraftsForUser(userId: string): Promise<Draft[]> {
-    const drafts = await api.getDraftsForUser(userId);
-    if (drafts && drafts.length > 0) {
-      const draftMap = new Map<string, Draft>();
-      this.cachedDrafts.forEach((d) => draftMap.set(d.id, d));
-      drafts.forEach((d) => draftMap.set(d.id, d));
-      this.cachedDrafts = Array.from(draftMap.values());
-      this.saveDraftsToStorage();
+    if (!userId || userId === 'guest-user') return this.cachedDrafts;
+    try {
+      const drafts = await api.getDraftsForUser(userId);
+      this.cachedDrafts = drafts || [];
+      return this.cachedDrafts;
+    } catch (err) {
+      console.error('Error fetching drafts in db:', err);
+      return this.cachedDrafts;
     }
-    return this.cachedDrafts;
   }
 
   async saveDraft(userId: string, draft: Partial<Draft>): Promise<Draft | null> {
@@ -435,25 +325,25 @@ class MexoDatabase {
       lastSavedAt: draft.lastSavedAt || new Date().toISOString(),
     };
 
-    // 1. Instantly save in local memory & storage
-    this.cachedDrafts = this.loadDraftsFromStorage();
     const idx = this.cachedDrafts.findIndex((d) => d.id === draftId);
     if (idx !== -1) {
       this.cachedDrafts[idx] = newDraft;
     } else {
       this.cachedDrafts.unshift(newDraft);
     }
-    this.saveDraftsToStorage();
 
-    // 2. Sync to cloud DB asynchronously
-    api.saveDraft(userId, newDraft).catch(() => {});
+    if (userId && userId !== 'guest-user') {
+      const saved = await api.saveDraft(userId, newDraft);
+      if (saved) return saved;
+    }
     return newDraft;
   }
 
   async deleteDraft(draftId: string): Promise<boolean> {
-    this.cachedDrafts = this.loadDraftsFromStorage().filter((d) => d.id !== draftId);
-    this.saveDraftsToStorage();
-    api.deleteDraft(draftId).catch(() => {});
+    this.cachedDrafts = this.cachedDrafts.filter((d) => d.id !== draftId);
+    if (draftId && !draftId.startsWith('drf-')) {
+      await api.deleteDraft(draftId);
+    }
     return true;
   }
 
@@ -461,16 +351,19 @@ class MexoDatabase {
     const cleanSender = senderEmail.toLowerCase().trim();
     const cleanSubject = (subject || '').toLowerCase().trim();
 
-    this.cachedDrafts = this.loadDraftsFromStorage().filter((d) => {
+    const draftsToDelete = this.cachedDrafts.filter((d) => {
       const sameSender = !d.userEmail || d.userEmail.toLowerCase().trim() === cleanSender;
       const sameSubject = (d.subject || '').toLowerCase().trim() === cleanSubject;
-      if (sameSender && sameSubject && cleanSubject.length > 0) {
-        api.deleteDraft(d.id).catch(() => {});
-        return false;
-      }
-      return true;
+      return sameSender && sameSubject && cleanSubject.length > 0;
     });
-    this.saveDraftsToStorage();
+
+    this.cachedDrafts = this.cachedDrafts.filter((d) => !draftsToDelete.includes(d));
+
+    for (const d of draftsToDelete) {
+      if (d.id && !d.id.startsWith('drf-')) {
+        api.deleteDraft(d.id).catch(() => {});
+      }
+    }
   }
 
   // --- CONTACTS ---

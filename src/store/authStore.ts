@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { MexoUser } from '../types/user';
 import { supabase } from '../services/supabaseClient';
 import { api } from '../services/api';
+import { db } from '../services/db';
 
 const DEFAULT_GUEST_USER: MexoUser = {
   id: 'guest-user',
@@ -79,6 +80,9 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
             isDefaultPasswordUser: isDefaultPwd,
             isLoading: false,
           });
+          // Hydrate in-memory DB cache from Supabase PostgreSQL
+          db.fetchMessagesForUser(profile.id);
+          db.fetchDraftsForUser(profile.id);
           return;
         }
       }
@@ -95,11 +99,13 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
               isDefaultPasswordUser: isDefaultPwd,
               isLoading: false,
             });
-            // Asynchronously refresh user profile from database in background if available
+            // Asynchronously refresh user profile, messages, and drafts from database
             api.getUserProfileByEmail(cachedUser.email).then((dbProfile) => {
               if (dbProfile && dbProfile.status !== 'suspended') {
                 localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(dbProfile));
                 set({ currentUser: dbProfile });
+                db.fetchMessagesForUser(dbProfile.id);
+                db.fetchDraftsForUser(dbProfile.id);
               }
             }).catch(() => {});
             return;
@@ -170,6 +176,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           isDefaultPasswordUser: isDefaultPassword,
           isLoading: false,
         });
+        db.fetchMessagesForUser(profile.id);
+        db.fetchDraftsForUser(profile.id);
         await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
         return true;
       }

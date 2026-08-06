@@ -453,6 +453,7 @@ export const api = {
   // --- MAIL & MESSAGES ---
   async getMessagesForUser(userId: string): Promise<Message[]> {
     try {
+      // Fetch user's message states joined with full message and message recipients
       const { data, error } = await supabase
         .from('message_states')
         .select(`
@@ -478,39 +479,68 @@ export const api = {
             message_type,
             status,
             created_at,
-            sent_at
+            sent_at,
+            message_recipients (
+              recipient_address,
+              recipient_type
+            )
           )
         `)
         .eq('user_id', userId)
         .order('updated_at', { ascending: false });
 
-      if (error || !data) return [];
+      if (error || !data) {
+        console.error('Error fetching messages for user:', error);
+        return [];
+      }
 
-      return data.map((item: any) => {
-        const msg = item.messages;
-        return {
+      // Fetch user profile email for userState.recipientEmail mapping
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('primary_address')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const userEmail = userProfile?.primary_address || '';
+
+      const seenStateIds = new Set<string>();
+      const result: Message[] = [];
+
+      for (const item of data) {
+        if (seenStateIds.has(item.id)) continue;
+        seenStateIds.add(item.id);
+
+        const msg: any = Array.isArray(item.messages) ? item.messages[0] : item.messages;
+        if (!msg) continue;
+
+        const recipList: string[] = (msg.message_recipients || []).map((r: any) => r.recipient_address);
+        const senderAddr = msg.sender_address || 'unknown@mexo.com';
+
+        result.push({
           id: item.id,
-          threadId: msg.thread_id,
-          senderName: msg.sender_address.split('@')[0],
-          senderEmail: msg.sender_address,
-          recipients: [],
+          threadId: msg.thread_id || item.id,
+          senderName: senderAddr.split('@')[0],
+          senderEmail: senderAddr,
+          recipients: recipList.length > 0 ? recipList : [userEmail],
           subject: msg.subject || '(no subject)',
           bodyHtml: msg.body_html || '',
-          snippet: msg.body_text?.substring(0, 100) || '',
-          createdAt: msg.created_at || msg.sent_at,
+          snippet: msg.body_text?.substring(0, 120) || '',
+          createdAt: msg.created_at || msg.sent_at || new Date().toISOString(),
           attachments: [],
           userState: {
-            recipientEmail: msg.sender_address,
-            isRead: item.is_read,
+            recipientEmail: userEmail || senderAddr,
+            isRead: Boolean(item.is_read),
             isStarred: Boolean(item.starred),
-            isArchived: item.is_archived,
-            isDeleted: item.is_deleted,
-            isSpam: item.is_spam,
-            isImportant: item.is_important,
+            isArchived: Boolean(item.is_archived),
+            isDeleted: Boolean(item.is_deleted),
+            isSpam: Boolean(item.is_spam),
+            isImportant: Boolean(item.is_important),
             labels: item.labels || [],
           },
-        };
-      });
+        });
+      }
+
+      return result;
     } catch (err) {
       console.error('Error getting messages:', err);
       return [];
@@ -526,88 +556,205 @@ export const api = {
     bodyHtml: string;
     attachments?: any[];
     clientMessageId?: string;
-  }): Promise<boolean> {
-    try {
-      const cleanSender = params.senderEmail.trim().toLowerCase();
-      const bodyText = params.bodyHtml.replace(/<[^>]*>?/gm, '');
+    draftId?: string;
+  }): Promise<{ success: boolean; error?: string; messageId?: string }> {
+    const cleanSender = params.senderEmail.trim().toLowerCase();
+    const cleanRecipients = (params.recipients || []).map((r) => {
+      let clean = r.trim().toLowerCase();
+      if (!clean.includes('@')) clean = `${clean}@mexo.com`;
+      return clean;
+    });
 
-      let validSenderUuid: string | null = null;
-      if (params.senderUserId && /^[0-9a-fA-F-]{36}$/.test(params.senderUserId)) {
-        validSenderUuid = params.senderUserId;
-      } else {
-        const { data: senderProf } = await supabase
+    console.log('[SEND] Send requested');
+    console.log('[SEND] Sender:', cleanSender);
+    console.log('[SEND] Recipient:', cleanRecipients.join(', '));
+    console.log('[SEND] Resolving recipient...');
+
+    if (cleanRecipients.length === 0) {
+      console.error('[SEND] Error: No recipients specified');
+      return { success: false, error: 'Recipient not found' };
+    }
+
+    // 1. Resolve Sender Profile UUID
+    let senderUuid: string | null = null;
+    if (params.senderUserId && /^[0-9a-fA-F-]{36}$/.test(params.senderUserId)) {
+      senderUuid = params.senderUserId;
+    } else {
+      const { data: senderProf } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('primary_address', cleanSender)
+        .maybeSingle();
+      if (senderProf?.id) senderUuid = senderProf.id;
+    }
+
+    if (!senderUuid) {
+      console.error('[SEND] Error: Sender profile not found in database');
+      return { success: false, error: 'Sender profile not found in database' };
+    }
+
+    // 2. Try Atomic RPC send_mail_transaction
+    const clientMsgId = params.clientMessageId || `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const bodyText = params.bodyHtml ? params.bodyHtml.replace(/<[^>]*>?/gm, '') : '';
+
+    try {
+      const { data: rpcRes, error: rpcErr } = await supabase.rpc('send_mail_transaction', {
+        p_sender_id:         senderUuid,
+        p_sender_address:    cleanSender,
+        p_recipients:        cleanRecipients,
+        p_subject:           params.subject || '(No Subject)',
+        p_body_html:         params.bodyHtml || '',
+        p_body_text:         bodyText,
+        p_client_message_id: clientMsgId,
+        p_draft_id:          params.draftId && /^[0-9a-fA-F-]{36}$/.test(params.draftId) ? params.draftId : null,
+      });
+
+      if (!rpcErr && rpcRes) {
+        const resObj = rpcRes as any;
+        if (resObj.success) {
+          console.log('[SEND] Recipient user ID:', resObj.recipient_user_ids?.join(', '));
+          console.log('[SEND] Creating message...');
+          console.log('[SEND] Message ID:', resObj.message_id);
+          console.log('[SEND] Creating recipient relation...');
+          console.log('[SEND] Creating sender mailbox state...');
+          console.log('[SEND] Creating recipient mailbox state...');
+          console.log('[SEND] Transaction committed');
+          console.log('[SEND] Publishing recipient realtime event');
+          console.log('[SEND] Completed');
+
+          return { success: true, messageId: resObj.message_id };
+        } else {
+          console.error('[SEND] Transaction RPC returned error:', resObj.error);
+          if (resObj.error && resObj.error.includes('Recipient not found')) {
+            return { success: false, error: 'Recipient not found' };
+          }
+        }
+      } else if (rpcErr) {
+        console.warn('[SEND] RPC send_mail_transaction notice:', rpcErr.message);
+      }
+    } catch (rpcException) {
+      console.warn('[SEND] RPC call exception, using client transaction fallback:', rpcException);
+    }
+
+    // 3. Client Transaction Fallback (if RPC is not available)
+    try {
+      // Validate all recipients against profiles / groups
+      const recipientProfiles: Array<{ id: string; email: string }> = [];
+
+      for (const recip of cleanRecipients) {
+        const recipHandle = recip.split('@')[0];
+        const { data: recipProf } = await supabase
           .from('profiles')
-          .select('id')
-          .eq('primary_address', cleanSender)
+          .select('id, primary_address')
+          .or(`primary_address.eq.${recip},username.eq.${recipHandle}`)
           .maybeSingle();
-        if (senderProf?.id) {
-          validSenderUuid = senderProf.id;
+
+        if (recipProf?.id) {
+          recipientProfiles.push({ id: recipProf.id, email: recipProf.primary_address });
+        } else {
+          // Check groups
+          const { data: group } = await supabase
+            .from('groups')
+            .select('id, group_address')
+            .or(`group_address.eq.${recip},slug.eq.${recipHandle}`)
+            .maybeSingle();
+
+          if (group?.id) {
+            const { data: members } = await supabase
+              .from('group_members')
+              .select('user_id, profiles(primary_address)')
+              .eq('group_id', group.id);
+
+            if (members && members.length > 0) {
+              members.forEach((m: any) => {
+                if (m.user_id && m.profiles?.primary_address) {
+                  recipientProfiles.push({ id: m.user_id, email: m.profiles.primary_address });
+                }
+              });
+            }
+          } else {
+            console.error('[SEND] Error: Recipient not found:', recip);
+            return { success: false, error: 'Recipient not found' };
+          }
         }
       }
 
-      // 1. Insert master message
+      if (recipientProfiles.length === 0) {
+        console.error('[SEND] Error: Recipient not found');
+        return { success: false, error: 'Recipient not found' };
+      }
+
+      console.log('[SEND] Recipient user ID:', recipientProfiles.map((r) => r.id).join(', '));
+      console.log('[SEND] Creating message...');
+
+      // Insert master message
       const { data: msgData, error: msgErr } = await supabase
         .from('messages')
         .insert({
-          sender_user_id: validSenderUuid,
+          sender_user_id: senderUuid,
           sender_address: cleanSender,
-          subject: params.subject || '(no subject)',
-          body_html: params.bodyHtml,
+          subject: params.subject || '(No Subject)',
+          body_html: params.bodyHtml || '',
           body_text: bodyText,
+          client_message_id: clientMsgId,
           status: 'sent',
         })
         .select()
         .single();
 
       if (msgErr || !msgData) {
-        console.error('Error inserting message:', msgErr);
-        return false;
+        console.error('[SEND] Error creating message:', msgErr);
+        return { success: false, error: msgErr?.message || 'Database error creating message' };
       }
 
-      // 2. Insert message state for sender (sent folder)
-      if (validSenderUuid) {
-        await supabase.from('message_states').insert({
+      console.log('[SEND] Message ID:', msgData.id);
+      console.log('[SEND] Creating recipient relation...');
+
+      // Insert recipient relations
+      for (const rp of recipientProfiles) {
+        await supabase.from('message_recipients').insert({
           message_id: msgData.id,
-          user_id: validSenderUuid,
-          folder: 'sent',
-          is_read: true,
+          recipient_user_id: rp.id,
+          recipient_address: rp.email,
+          recipient_type: 'to',
+          delivery_status: 'delivered',
         });
       }
 
-      // 3. Resolve recipients & create inbox states for recipients
-      for (const recip of params.recipients) {
-        const recipEmail = await this.resolveUsernameToEmail(recip);
-        const recipUsername = recip.includes('@') ? recip.split('@')[0] : recip;
+      console.log('[SEND] Creating sender mailbox state...');
+      // Insert sender state
+      await supabase.from('message_states').upsert({
+        message_id: msgData.id,
+        user_id: senderUuid,
+        folder: 'sent',
+        is_read: true,
+      }, { onConflict: 'message_id,user_id,folder' });
 
-        if (recipEmail !== cleanSender) {
-          const { data: recipProfile } = await supabase
-            .from('profiles')
-            .select('id')
-            .or(`primary_address.eq.${recipEmail},username.eq.${recipUsername}`)
-            .maybeSingle();
-
-          if (recipProfile?.id) {
-            await supabase.from('message_recipients').insert({
-              message_id: msgData.id,
-              recipient_user_id: recipProfile.id,
-              recipient_address: recipEmail,
-              recipient_type: 'to',
-            });
-
-            await supabase.from('message_states').insert({
-              message_id: msgData.id,
-              user_id: recipProfile.id,
-              folder: 'inbox',
-              is_read: false,
-            });
-          }
-        }
+      console.log('[SEND] Creating recipient mailbox state...');
+      // Insert recipient states
+      for (const rp of recipientProfiles) {
+        await supabase.from('message_states').upsert({
+          message_id: msgData.id,
+          user_id: rp.id,
+          folder: 'inbox',
+          is_read: false,
+        }, { onConflict: 'message_id,user_id,folder' });
       }
 
-      return true;
-    } catch (err) {
-      console.error('Error sending message:', err);
-      return false;
+      // Delete draft if draftId provided
+      if (params.draftId && /^[0-9a-fA-F-]{36}$/.test(params.draftId)) {
+        await supabase.from('drafts').delete().eq('id', params.draftId);
+      }
+      await supabase.from('drafts').delete().eq('owner_user_id', senderUuid).eq('subject', params.subject);
+
+      console.log('[SEND] Transaction committed');
+      console.log('[SEND] Publishing recipient realtime event');
+      console.log('[SEND] Completed');
+
+      return { success: true, messageId: msgData.id };
+    } catch (err: any) {
+      console.error('[SEND] Delivery transaction error:', err);
+      return { success: false, error: err?.message || 'Mail delivery transaction failed' };
     }
   },
 

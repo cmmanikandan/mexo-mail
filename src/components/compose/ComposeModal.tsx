@@ -188,7 +188,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
 
   const handleSendNow = async (e?: React.SyntheticEvent) => {
     if (e) e.preventDefault();
-    if (instance.isSending) return;
+    if (instance.isSending || instance.isSent) return;
     if (isUploading) {
       addToast({ message: 'Please wait for attachment upload to complete.', type: 'warning' });
       return;
@@ -200,8 +200,10 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
 
     updateCompose(instance.id, { isSending: true });
 
-    // Unique client idempotency key for send operation
-    const clientMessageId = `msg-send-${instance.id}-${Date.now()}`;
+    // Generate idempotency UUID
+    const clientMessageId = typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
 
     const senderEmail = currentUser?.email || 'user@mexo.com';
     const senderName = currentUser?.firstName
@@ -212,7 +214,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       : undefined;
 
     try {
-      const ok = await db.sendMessage({
+      const res = await db.sendMessage({
         senderUserId,
         senderEmail,
         senderName,
@@ -221,33 +223,34 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         bodyHtml: instance.bodyHtml || '<p></p>',
         attachments: instance.attachments,
         clientMessageId,
+        draftId: instance.draftId,
       });
 
-      // Purge any associated draft records on send
-      if (instance.draftId) {
-        db.deleteDraft(instance.draftId);
+      if (res.success) {
+        updateCompose(instance.id, { isSending: false, isSent: true });
+
+        // Delete draft from DB and memory
+        if (instance.draftId) {
+          db.deleteDraft(instance.draftId);
+        }
+        db.clearDraftsForMessage(senderEmail, instance.to, instance.subject);
+
+        useMailStore.getState().triggerRefresh();
+
+        // Broadcast to all connected clients & cross-tab
+        realtimeService.broadcastRefresh();
+
+        closeCompose(instance.id, true);
+        addToast({ message: 'Message sent', type: 'success' });
+      } else {
+        updateCompose(instance.id, { isSending: false, isSent: false });
+        const errMsg = res.error || "Message couldn't be sent. Please try again.";
+        addToast({ message: errMsg, type: 'error' });
       }
-      db.clearDraftsForMessage(senderEmail, instance.to, instance.subject);
-
-      useMailStore.getState().triggerRefresh();
-
-      // Broadcast to all tabs + trigger same-tab refresh immediately
-      realtimeService.broadcastRefresh();
-      realtimeService.broadcastNewMessage({
-        type: 'NEW_MESSAGE',
-        messageId: clientMessageId,
-        senderName,
-        subject: instance.subject || '(No Subject)',
-        recipientEmail: instance.to[0] || '',
-      });
-
-      closeCompose(instance.id, true);
-      addToast({ message: 'Message sent successfully!', type: 'success' });
     } catch (sendErr: any) {
       console.error('Send message error:', sendErr);
-      addToast({ message: 'Failed to send message. Please try again.', type: 'error' });
-    } finally {
-      updateCompose(instance.id, { isSending: false });
+      updateCompose(instance.id, { isSending: false, isSent: false });
+      addToast({ message: "Message couldn't be sent. Please try again.", type: 'error' });
     }
   };
 

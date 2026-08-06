@@ -27,6 +27,8 @@ import {
 } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
+import { useAuthStore } from '../../store/authStore';
+
 export const AppSidebar: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -35,6 +37,7 @@ export const AppSidebar: React.FC = () => {
   const { isSidebarExpanded, addToast } = useUIStore();
   const { currentFolder, activeLabelId, setCurrentFolder, lastUpdated } = useMailStore();
   const { openCompose } = useComposeStore();
+  const { currentUser } = useAuthStore();
 
   const [isMoreExpanded, setIsMoreExpanded] = useState(false);
 
@@ -45,8 +48,7 @@ export const AppSidebar: React.FC = () => {
 
   // Read live labels from persistent DB
   const [labels, setLabels] = useState<Label[]>(db.getLabels());
-  const currentUser = db.getCurrentUser();
-  const userEmail = currentUser?.email || 'manikandanprabhu1221@mexo.com';
+  const userEmail = currentUser?.email || 'user@mexo.com';
 
   const refreshLabels = () => {
     setLabels(db.getLabels());

@@ -16,6 +16,7 @@ export interface ComposeInstance {
   isMaximized: boolean;
   isSaving: boolean;
   isSending?: boolean;
+  isSent?: boolean;
   lastSavedAt?: string;
 }
 
@@ -49,6 +50,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
       isMaximized: false,
       isSaving: false,
       isSending: false,
+      isSent: false,
       draftId: initialData?.draftId,
     };
     set((state) => ({
@@ -60,9 +62,9 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   closeCompose: (id, discardDraft = false) => {
     const inst = get().instances.find((i) => i.id === id);
     if (inst) {
-      if (discardDraft) {
+      if (discardDraft || inst.isSent) {
         if (inst.draftId) db.deleteDraft(inst.draftId);
-      } else {
+      } else if (!inst.isSending && !inst.isSent) {
         get().saveComposeDraft(id);
       }
     }
@@ -93,6 +95,9 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
   saveComposeDraft: (id) => {
     const inst = get().instances.find((i) => i.id === id);
     if (!inst) return;
+
+    // Do NOT auto-save if message is sending or already sent
+    if (inst.isSending || inst.isSent) return;
 
     const hasMeaningfulContent =
       inst.to.length > 0 ||

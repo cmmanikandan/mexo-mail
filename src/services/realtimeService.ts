@@ -1,13 +1,11 @@
 /**
  * MEXO Mail Real-Time Sync Service
  *
- * Since this app uses localStorage (no WebSocket backend), we use:
- *  1. BroadcastChannel API — instant cross-tab communication (fast, 0ms latency)
- *  2. window.storage event — cross-tab localStorage change detection
- *  3. setInterval polling (1.5s) — same-tab fallback & message count watcher
- *
- * All three work together to give a "WebSocket-like" experience.
+ * Direct Supabase Postgres Changes Realtime Subscriptions
+ * Subscribes to message_states inserts for the authenticated recipient user.
  */
+import { supabase } from './supabaseClient';
+import { RealtimeChannel } from '@supabase/supabase-js';
 
 export type RealtimeEvent =
   | { type: 'NEW_MESSAGE'; messageId: string; senderName: string; subject: string; recipientEmail: string }
@@ -17,28 +15,25 @@ export type RealtimeEvent =
 type RealtimeListener = (event: RealtimeEvent) => void;
 
 const CHANNEL_NAME = 'mexo-mail-sync';
-const STORAGE_KEYS_MESSAGES = 'mexo_messages_v1';
 
 class RealtimeService {
-  private channel: BroadcastChannel | null = null;
+  private broadcastChannel: BroadcastChannel | null = null;
+  private supabaseChannel: RealtimeChannel | null = null;
   private listeners: RealtimeListener[] = [];
-  private lastMessageCount = 0;
-  private lastMessageIds = new Set<string>();
-  private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private currentUserId = '';
   private currentUserEmail = '';
 
-  /** Call once on app mount with the logged-in user's email */
-  connect(userEmail: string) {
-    this.currentUserEmail = userEmail.toLowerCase();
-
-    // Snapshot current message IDs to track new arrivals
-    this.snapshotMessages();
+  /** Call once on app mount with the logged-in user's credentials */
+  connect(userEmail: string, userId?: string) {
+    this.currentUserEmail = userEmail.toLowerCase().trim();
+    this.currentUserId = userId || '';
 
     // 1. BroadcastChannel: zero-latency cross-tab sync
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        this.channel = new BroadcastChannel(CHANNEL_NAME);
-        this.channel.onmessage = (e) => {
+        if (this.broadcastChannel) this.broadcastChannel.close();
+        this.broadcastChannel = new BroadcastChannel(CHANNEL_NAME);
+        this.broadcastChannel.onmessage = (e) => {
           const event = e.data as RealtimeEvent;
           if (event.type === 'NEW_MESSAGE' && event.recipientEmail === this.currentUserEmail) {
             this.emit(event);
@@ -47,35 +42,71 @@ class RealtimeService {
           }
         };
       } catch {
-        // BroadcastChannel not supported — silently fall back
+        // BroadcastChannel fallback
       }
     }
 
-    // 2. storage event: detects localStorage writes from other tabs
-    window.addEventListener('storage', this.handleStorageEvent);
+    // 2. Supabase Realtime Channel for database-backed postgres_changes
+    if (this.supabaseChannel) {
+      supabase.removeChannel(this.supabaseChannel);
+    }
 
-    // 3. Interval polling (1.5s): catches same-tab sends & any missed events
-    this.pollInterval = setInterval(this.pollMessages, 1500);
+    if (this.currentUserId && this.currentUserId !== 'guest-user') {
+      this.supabaseChannel = supabase
+        .channel(`user-mailbox-${this.currentUserId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'message_states',
+            filter: `user_id=eq.${this.currentUserId}`,
+          },
+          async (payload: any) => {
+            if (payload?.new?.folder === 'inbox') {
+              const msgId = payload.new.message_id;
+
+              // Fetch message details for toast notification
+              const { data: msg } = await supabase
+                .from('messages')
+                .select('sender_address, subject')
+                .eq('id', msgId)
+                .maybeSingle();
+
+              const senderAddress = msg?.sender_address || 'Unknown';
+              const subject = msg?.subject || '(No Subject)';
+
+              this.emit({
+                type: 'NEW_MESSAGE',
+                messageId: msgId,
+                senderName: senderAddress.split('@')[0],
+                subject,
+                recipientEmail: this.currentUserEmail,
+              });
+            }
+          }
+        )
+        .subscribe();
+    }
   }
 
   disconnect() {
-    this.channel?.close();
-    this.channel = null;
-    window.removeEventListener('storage', this.handleStorageEvent);
-    if (this.pollInterval !== null) {
-      clearInterval(this.pollInterval);
-      this.pollInterval = null;
+    this.broadcastChannel?.close();
+    this.broadcastChannel = null;
+    if (this.supabaseChannel) {
+      supabase.removeChannel(this.supabaseChannel);
+      this.supabaseChannel = null;
     }
     this.listeners = [];
   }
 
-  /** Broadcast that a new message was sent (called by sendMessage flows) */
+  /** Broadcast that a new message was sent (called by sendMessage flows to notify recipient) */
   broadcastNewMessage(event: Extract<RealtimeEvent, { type: 'NEW_MESSAGE' }>) {
-    this.channel?.postMessage(event);
+    this.broadcastChannel?.postMessage(event);
   }
 
   broadcastRefresh() {
-    this.channel?.postMessage({ type: 'MESSAGES_REFRESHED' } as RealtimeEvent);
+    this.broadcastChannel?.postMessage({ type: 'MESSAGES_REFRESHED' } as RealtimeEvent);
   }
 
   subscribe(listener: RealtimeListener): () => void {
@@ -87,69 +118,6 @@ class RealtimeService {
 
   private emit(event: RealtimeEvent) {
     this.listeners.forEach((l) => l(event));
-  }
-
-  private snapshotMessages() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS_MESSAGES);
-      const msgs: Array<{ id: string; userState: { recipientEmail: string } }> = raw ? JSON.parse(raw) : [];
-      const mine = msgs.filter((m) => m.userState.recipientEmail?.toLowerCase() === this.currentUserEmail);
-      this.lastMessageCount = mine.length;
-      this.lastMessageIds = new Set(mine.map((m) => m.id));
-    } catch {
-      // ignore parse errors
-    }
-  }
-
-  private handleStorageEvent = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEYS_MESSAGES) {
-      this.checkForNewMessages();
-    }
-  };
-
-  private pollMessages = () => {
-    this.checkForNewMessages();
-  };
-
-  private checkForNewMessages() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS_MESSAGES);
-      if (!raw) return;
-      const msgs: Array<{
-        id: string;
-        senderName: string;
-        subject: string;
-        userState: { recipientEmail: string; isDeleted: boolean };
-      }> = JSON.parse(raw);
-
-      const mine = msgs.filter(
-        (m) =>
-          m.userState.recipientEmail?.toLowerCase() === this.currentUserEmail && !m.userState.isDeleted
-      );
-
-      const newIds = mine.filter((m) => !this.lastMessageIds.has(m.id));
-
-      if (newIds.length > 0) {
-        // Update snapshot
-        this.snapshotMessages();
-
-        newIds.forEach((m) => {
-          this.emit({
-            type: 'NEW_MESSAGE',
-            messageId: m.id,
-            senderName: m.senderName || 'Unknown',
-            subject: m.subject || '(no subject)',
-            recipientEmail: this.currentUserEmail,
-          });
-        });
-      } else if (mine.length !== this.lastMessageCount) {
-        // Message count changed (deletion / state update)
-        this.snapshotMessages();
-        this.emit({ type: 'MESSAGES_REFRESHED' });
-      }
-    } catch {
-      // ignore parse errors
-    }
   }
 }
 

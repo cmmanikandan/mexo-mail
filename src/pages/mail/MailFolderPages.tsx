@@ -11,21 +11,48 @@ import { useAuthStore } from '../../store/authStore';
 import { filterMessagesByQuery } from '../../utils/SearchQueryParser';
 import { Message, Thread } from '../../types/mail';
 
+import { realtimeService } from '../../services/realtimeService';
+
 export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ folderOverride }) => {
   const { folder: paramFolder } = useParams<{ folder: string }>();
   const [searchParams] = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
 
-  const { currentFolder, activeLabelId, searchQuery, lastUpdated } = useMailStore();
+  const { currentFolder, activeLabelId, searchQuery, lastUpdated, triggerRefresh } = useMailStore();
+  const { currentUser } = useAuthStore();
 
   const activeFolder = folderOverride || (paramFolder as MailFolder) || currentFolder || 'inbox';
   const effectiveQuery = urlQuery || searchQuery;
 
   const isMobileSearchRoute = activeFolder === 'search' && typeof window !== 'undefined' && window.innerWidth < 768;
 
+  // Asynchronously fetch messages and drafts from Supabase database on mount/refresh
+  React.useEffect(() => {
+    if (currentUser?.id && currentUser.id !== 'guest-user') {
+      Promise.all([
+        db.fetchMessagesForUser(currentUser.id),
+        db.fetchDraftsForUser(currentUser.id),
+      ]).then(() => {
+        triggerRefresh();
+      });
+
+      // Connect Realtime subscription
+      realtimeService.connect(currentUser.email, currentUser.id);
+
+      const unsubscribe = realtimeService.subscribe((evt: any) => {
+        if (evt.type === 'NEW_MESSAGE' || evt.type === 'MESSAGES_REFRESHED') {
+          db.fetchMessagesForUser(currentUser.id).then(() => triggerRefresh());
+        }
+      });
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [currentUser?.id, lastUpdated]);
+
   // Reactively recompute filtered messages on any state change or action (lastUpdated)
   const filteredMessages: Message[] = React.useMemo(() => {
-    const { currentUser } = useAuthStore.getState();
     const userEmail = currentUser?.email || 'user@mexo.com';
     const messages = db.getMessagesForUser(userEmail);
     const labels = db.getLabels();
@@ -35,7 +62,7 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
       return userDrafts.map((d) => ({
         id: d.id,
         threadId: `th-draft-${d.id}`,
-        senderName: currentUser?.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : userEmail,
+        senderName: currentUser?.firstName ? `${currentUser.firstName} ${currentUser.lastName}`.trim() : userEmail,
         senderEmail: userEmail,
         recipients: d.to.length > 0 ? d.to : ['(No recipients)'],
         subject: d.subject || '(Draft)',
@@ -88,7 +115,7 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
         case 'sent':
           return msg.senderEmail.toLowerCase() === cleanUserEmail && !st.isDeleted;
         case 'scheduled':
-          return false; // Scheduled messages are separate
+          return false;
         case 'archive':
           return st.isArchived && !st.isDeleted && !st.isSpam;
         case 'all':
@@ -109,7 +136,7 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
       seen.add(m.id);
       return true;
     });
-  }, [activeFolder, activeLabelId, effectiveQuery, lastUpdated]);
+  }, [activeFolder, activeLabelId, effectiveQuery, lastUpdated, currentUser?.email]);
 
   const settings = db.getSettings();
   const readingPanePos = settings.readingPanePosition || 'off';
