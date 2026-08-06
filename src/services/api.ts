@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { mexoPlatformAuth } from './mexoPlatformAuth';
 import { MexoUser, UserSession, SecurityEvent } from '../types/user';
 import { Message, Label, Draft, UserSignature } from '../types/mail';
 import { MexoGroup, GroupMember } from '../types/group';
@@ -397,38 +398,25 @@ export const api = {
   },
 
 
-  async updateUserPassword(newPassword: string, currentUserEmail?: string, currentUsername?: string): Promise<{ success: boolean; error?: string }> {
+  async updateUserPassword(newPassword: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (!error) {
-        return { success: true };
+      let session: any = null;
+      try {
+        session = await mexoPlatformAuth.ensureAuthenticatedSession();
+      } catch {
+        return { success: false, error: 'SESSION_EXPIRED' };
       }
 
-      console.warn('[PASSWORD UPDATE] Supabase updateUser error:', error.message);
-
-      // Fallback: Re-authenticate if Auth session is missing or expired
-      if ((error.message.includes('Auth session missing') || error.message.includes('session')) && currentUserEmail) {
-        const pwdCandidates = [
-          currentUsername?.trim() || '',
-          currentUserEmail.split('@')[0],
-          'password123',
-          'admin123',
-        ].filter(Boolean);
-
-        for (const candidate of pwdCandidates) {
-          const { error: signInErr } = await supabase.auth.signInWithPassword({
-            email: currentUserEmail,
-            password: candidate,
-          });
-          if (!signInErr) {
-            const { error: retryErr } = await supabase.auth.updateUser({ password: newPassword });
-            if (!retryErr) return { success: true };
-            return { success: false, error: retryErr.message };
-          }
-        }
+      if (!session?.user) {
+        return { success: false, error: 'SESSION_EXPIRED' };
       }
 
-      return { success: false, error: error.message };
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+      if (updateError) {
+        return { success: false, error: updateError.message };
+      }
+
+      return { success: true };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Failed to update password.' };
     }

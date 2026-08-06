@@ -81,7 +81,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
     try {
       setIsSubmitting(true);
 
-      const res = await api.updateUserPassword(newPassword.trim(), currentUser?.email, currentUser?.username);
+      const res = await api.updateUserPassword(newPassword.trim());
 
       if (res.success) {
         db.changeUserPassword(currentUser.id, newPassword.trim());

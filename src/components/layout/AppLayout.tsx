@@ -26,20 +26,20 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
   const { isCreateGroupOpen, setCreateGroupOpen, isCreateContactOpen, setCreateContactOpen, isAdvancedSearchOpen, setAdvancedSearchOpen, isKeyboardShortcutsOpen, setKeyboardShortcutsOpen } = useUIStore();
   const { openCompose } = useComposeStore();
   const { currentFolder, setCurrentFolder, lastUpdated } = useMailStore();
-  const { currentUser, isDefaultPasswordUser } = useAuthStore();
+  const { currentUser, isAuthenticated, isLoading: isAuthLoading, isDefaultPasswordUser } = useAuthStore();
   const userEmail = currentUser?.email || 'manikandanprabhu1221@mexo.com';
 
   // Pop-up Suggestion Modals state
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isInstallAppModalOpen, setIsInstallAppModalOpen] = useState(false);
 
-  // Trigger Change Password modal if user logged in with default password (password == username)
+  // Trigger Change Password modal only when auth initialization finished & user authenticated
   useEffect(() => {
-    if (isDefaultPasswordUser) {
+    if (!isAuthLoading && isAuthenticated && isDefaultPasswordUser) {
       const timer = setTimeout(() => setIsChangePasswordModalOpen(true), 600);
       return () => clearTimeout(timer);
     }
-  }, [isDefaultPasswordUser]);
+  }, [isAuthLoading, isAuthenticated, isDefaultPasswordUser]);
 
   // Trigger Install App suggestion modal if not dismissed for current session
   useEffect(() => {

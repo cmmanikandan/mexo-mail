@@ -17,11 +17,13 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
   onClose,
 }) => {
   const { addToast } = useUIStore();
-  const { currentUser, clearDefaultPasswordFlag } = useAuthStore();
+  const { currentUser, signOut, clearDefaultPasswordFlag } = useAuthStore();
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
   const [error, setError] = useState('');
 
   const isMatching = confirmPassword.length > 0 && newPassword === confirmPassword;
@@ -46,21 +48,57 @@ export const ChangePasswordSuggestionModal: React.FC<ChangePasswordSuggestionMod
     try {
       setIsLoading(true);
       setError('');
+      setSessionExpired(false);
 
-      const res = await api.updateUserPassword(newPassword, currentUser?.email, currentUser?.username);
+      const res = await api.updateUserPassword(newPassword);
       if (res.success) {
-        addToast({ message: 'Password updated successfully! Your account is now secured.', type: 'success' });
+        // Clear security flag ONLY after successful Supabase Auth password update
         clearDefaultPasswordFlag();
-        onClose();
+        setIsSuccess(true);
+        addToast({ message: 'Your MEXO Account password has been changed successfully.', type: 'success' });
+        setTimeout(() => {
+          onClose();
+        }, 1500);
+      } else if (res.error === 'SESSION_EXPIRED') {
+        setSessionExpired(true);
+        setError('Your session has expired. Please sign in again.');
       } else {
-        setError(res.error || 'Failed to update password. Try again.');
+        setError(res.error || 'Unable to update password. Please try again.');
       }
     } catch (err: any) {
-      setError(err?.message || 'Password update failed.');
+      setError(err?.message || 'Unable to update password. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (sessionExpired) {
+    return (
+      <MexoModal isOpen={isOpen} onClose={onClose} title="Session Expired" maxWidth="md">
+        <div className="p-6 text-center space-y-4 select-none">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto shadow-sm">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h3 className="text-sm font-extrabold text-slate-900 dark:text-slate-100">
+            Session Expired
+          </h3>
+          <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xs mx-auto leading-relaxed">
+            Your session has expired. Please sign in again to update your MEXO Account password.
+          </p>
+          <button
+            type="button"
+            onClick={async () => {
+              await signOut();
+              window.location.href = '/login';
+            }}
+            className="w-full py-2.5 bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white rounded-xl text-xs font-bold shadow-md cursor-pointer hover:opacity-95 transition-all"
+          >
+            Sign In Again
+          </button>
+        </div>
+      </MexoModal>
+    );
+  }
 
   return (
     <MexoModal isOpen={isOpen} onClose={onClose} title="Security Recommendation" maxWidth="md">

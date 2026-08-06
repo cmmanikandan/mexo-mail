@@ -63,6 +63,25 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
       const isDefaultPwd = localStorage.getItem(STORAGE_KEY_DEFAULT_PWD) === 'true';
 
+      // Register global onAuthStateChange listener once
+      if (typeof window !== 'undefined' && !(window as any).__mexo_auth_listener_registered) {
+        (window as any).__mexo_auth_listener_registered = true;
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_OUT') {
+            localStorage.removeItem(STORAGE_KEY_ACTIVE_USER);
+            localStorage.removeItem(STORAGE_KEY_DEFAULT_PWD);
+            set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isDefaultPasswordUser: false });
+          } else if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'SIGNED_IN') {
+            if (session?.user) {
+              const updatedProfile = await api.getCurrentUserProfile(session.user.id);
+              if (updatedProfile) {
+                set({ currentUser: updatedProfile, isAuthenticated: true });
+              }
+            }
+          }
+        });
+      }
+
       // 1. Check active Supabase session
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionUser = sessionData?.session?.user;

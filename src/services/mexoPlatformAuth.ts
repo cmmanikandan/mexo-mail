@@ -9,6 +9,24 @@ export const mexoPlatformAuth = {
     return session;
   },
 
+  /** Reusable session verification and recovery function */
+  async ensureAuthenticatedSession() {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+
+    if (data?.session) {
+      return data.session;
+    }
+
+    // Attempt refresh/recovery if session expired or transiently missing
+    const refreshResult = await supabase.auth.refreshSession();
+    if (refreshResult.error || !refreshResult.data?.session) {
+      throw new Error('SESSION_EXPIRED');
+    }
+
+    return refreshResult.data.session;
+  },
+
   /** Retrieve central MEXO Account profile by User ID */
   async getCurrentProfile(userId: string): Promise<MexoUser | null> {
     const { data: profile, error } = await supabase
