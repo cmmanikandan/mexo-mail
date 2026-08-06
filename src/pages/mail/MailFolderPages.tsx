@@ -129,13 +129,15 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
       }
     });
 
-    // Deduplicate by message ID to guarantee unique message rendering
+    // Deduplicate by message ID & sort by date descending (most recent first)
     const seen = new Set<string>();
-    return rawFiltered.filter((m) => {
+    const deduplicated = rawFiltered.filter((m) => {
       if (seen.has(m.id)) return false;
       seen.add(m.id);
       return true;
     });
+
+    return deduplicated.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [activeFolder, activeLabelId, effectiveQuery, lastUpdated, currentUser?.email]);
 
   const settings = db.getSettings();

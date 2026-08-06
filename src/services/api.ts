@@ -572,6 +572,7 @@ export const api = {
         });
       }
 
+      result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return result;
     } catch (err) {
       console.error('Error getting messages:', err);
