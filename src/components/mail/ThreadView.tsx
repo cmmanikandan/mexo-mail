@@ -196,7 +196,7 @@ ${latestMsg.bodyHtml}`,
       </div>
 
       {/* ── Main Conversation Scroll Body ── */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto w-full">
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6 max-w-4xl mx-auto w-full pb-mobile-nav">
         {/* Subject Header */}
         <div className="pb-3 border-b border-app-border">
           <div className="flex items-start justify-between gap-2">

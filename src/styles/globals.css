@@ -6,6 +6,7 @@
   :root {
     --primary: 12 142 242;
     --accent-green: 16 185 129;
+    --mobile-bottom-nav-height: 76px;
   }
   
   body {
@@ -14,6 +15,12 @@
 
   body.dark {
     @apply bg-slate-950 text-slate-100;
+  }
+}
+
+@media (max-width: 767px) {
+  .pb-mobile-nav {
+    padding-bottom: calc(var(--mobile-bottom-nav-height) + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
 

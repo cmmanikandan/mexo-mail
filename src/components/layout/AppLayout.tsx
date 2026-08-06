@@ -108,7 +108,7 @@ export const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children })
         </div>
 
         {/* Main Content Area */}
-        <main className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950 flex flex-col">
+        <main className="flex-1 min-h-0 overflow-y-auto bg-slate-50 dark:bg-slate-950 flex flex-col pb-mobile-nav md:pb-0">
           {children}
         </main>
       </div>

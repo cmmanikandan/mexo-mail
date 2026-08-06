@@ -81,7 +81,7 @@ export const AccountSettingsLayout: React.FC<AccountSettingsLayoutProps> = ({
           )}
 
           {/* Content Panel */}
-          <main className="flex-1 min-w-0 md:pb-6">
+          <main className="flex-1 min-w-0 md:pb-6 pb-mobile-nav">
             {children}
           </main>
         </div>
