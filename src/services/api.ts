@@ -476,6 +476,7 @@ export const api = {
             subject,
             body_html,
             body_text,
+            attachments,
             message_type,
             status,
             created_at,
@@ -515,6 +516,7 @@ export const api = {
 
         const recipList: string[] = (msg.message_recipients || []).map((r: any) => r.recipient_address);
         const senderAddr = msg.sender_address || 'unknown@mexo.com';
+        const parsedAttachments = msg.attachments && Array.isArray(msg.attachments) ? msg.attachments : [];
 
         result.push({
           id: item.id,
@@ -526,7 +528,7 @@ export const api = {
           bodyHtml: msg.body_html || '',
           snippet: msg.body_text?.substring(0, 120) || '',
           createdAt: msg.created_at || msg.sent_at || new Date().toISOString(),
-          attachments: [],
+          attachments: parsedAttachments,
           userState: {
             recipientEmail: userEmail || senderAddr,
             isRead: Boolean(item.is_read),
@@ -607,6 +609,7 @@ export const api = {
         p_body_text:         bodyText,
         p_client_message_id: clientMsgId,
         p_draft_id:          params.draftId && /^[0-9a-fA-F-]{36}$/.test(params.draftId) ? params.draftId : null,
+        p_attachments:       params.attachments || [],
       });
 
       if (!rpcErr && rpcRes) {
@@ -696,6 +699,7 @@ export const api = {
           subject: params.subject || '(No Subject)',
           body_html: params.bodyHtml || '',
           body_text: bodyText,
+          attachments: params.attachments || [],
           client_message_id: clientMsgId,
           status: 'sent',
         })

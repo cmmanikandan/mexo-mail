@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS public.messages (
   subject TEXT DEFAULT '',
   body_html TEXT DEFAULT '',
   body_text TEXT DEFAULT '',
+  attachments JSONB DEFAULT '[]'::jsonb,
   client_message_id TEXT,
   message_type TEXT DEFAULT 'normal',
   status TEXT DEFAULT 'sent',
@@ -203,7 +204,8 @@ CREATE OR REPLACE FUNCTION public.send_mail_transaction(
   p_body_html          TEXT,
   p_body_text          TEXT,
   p_client_message_id  TEXT DEFAULT NULL,
-  p_draft_id           UUID DEFAULT NULL
+  p_draft_id           UUID DEFAULT NULL,
+  p_attachments        JSONB DEFAULT '[]'::jsonb
 )
 RETURNS JSON
 LANGUAGE plpgsql
@@ -316,6 +318,7 @@ BEGIN
     subject,
     body_html,
     body_text,
+    attachments,
     client_message_id,
     status,
     sent_at,
@@ -328,6 +331,7 @@ BEGIN
     COALESCE(p_subject, '(No Subject)'),
     COALESCE(p_body_html, ''),
     COALESCE(p_body_text, ''),
+    COALESCE(p_attachments, '[]'::jsonb),
     TRIM(p_client_message_id),
     'sent',
     NOW(),
