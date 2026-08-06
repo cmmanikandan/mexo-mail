@@ -186,7 +186,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     });
   };
 
-  const handleSendNow = (e?: React.SyntheticEvent) => {
+  const handleSendNow = async (e?: React.SyntheticEvent) => {
     if (e) e.preventDefault();
     if (instance.isSending) return;
     if (isUploading) {
@@ -203,31 +203,46 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     // Unique client idempotency key for send operation
     const clientMessageId = `msg-send-${instance.id}-${Date.now()}`;
 
-    const createdMessages = db.sendMessage({
-      senderName: currentUser.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : currentUser.email,
-      senderEmail: currentUser.email,
-      recipients: instance.to,
-      subject: instance.subject || '(No Subject)',
-      bodyHtml: instance.bodyHtml,
-      attachments: instance.attachments,
-    });
+    const senderEmail = currentUser?.email || 'user@mexo.com';
+    const senderName = currentUser?.firstName
+      ? `${currentUser.firstName} ${currentUser.lastName}`.trim()
+      : (currentUser?.email || 'MEXO User');
+    const senderUserId = currentUser?.id && /^[0-9a-fA-F-]{36}$/.test(currentUser.id)
+      ? currentUser.id
+      : undefined;
 
-    useMailStore.getState().triggerRefresh();
+    try {
+      const ok = await db.sendMessage({
+        senderUserId,
+        senderEmail,
+        senderName,
+        recipients: instance.to,
+        subject: instance.subject || '(No Subject)',
+        bodyHtml: instance.bodyHtml || '<p></p>',
+        attachments: instance.attachments,
+        clientMessageId,
+      });
 
-    // Broadcast to all tabs + trigger same-tab refresh immediately
-    realtimeService.broadcastRefresh();
-    if (currentUser?.email) {
+      useMailStore.getState().triggerRefresh();
+
+      // Broadcast to all tabs + trigger same-tab refresh immediately
+      realtimeService.broadcastRefresh();
       realtimeService.broadcastNewMessage({
         type: 'NEW_MESSAGE',
         messageId: clientMessageId,
-        senderName: `${currentUser.firstName} ${currentUser.lastName}`.trim(),
+        senderName,
         subject: instance.subject || '(No Subject)',
         recipientEmail: instance.to[0] || '',
       });
-    }
 
-    closeCompose(instance.id, true);
-    addToast({ message: 'Message sent', type: 'success' });
+      closeCompose(instance.id, true);
+      addToast({ message: 'Message sent successfully!', type: 'success' });
+    } catch (sendErr: any) {
+      console.error('Send message error:', sendErr);
+      addToast({ message: 'Failed to send message. Please try again.', type: 'error' });
+    } finally {
+      updateCompose(instance.id, { isSending: false });
+    }
   };
 
   const handleScheduleConfirm = (scheduledIso: string) => {

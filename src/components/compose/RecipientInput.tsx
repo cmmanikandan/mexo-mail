@@ -1,7 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { db } from '../../services/db';
+import { api } from '../../services/api';
 import { MexoAvatar } from '../common/MexoAvatar';
 import { X, Users } from 'lucide-react';
+import { MexoUser } from '../../types/user';
 
 export interface RecipientInputProps {
   label: string;
@@ -20,34 +22,58 @@ export const RecipientInput: React.FC<RecipientInputProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
+  const [cloudUsers, setCloudUsers] = useState<MexoUser[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Fetch all registered users for autocomplete
+  useEffect(() => {
+    let isMounted = true;
+    api.getAllUsers().then((uList) => {
+      if (isMounted && uList) {
+        setCloudUsers(uList);
+      }
+    }).catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
+
   const contacts = db.getContacts();
-  const users = db.getUsers();
+  const dbUsers = db.getUsers();
   const groups = db.getGroups();
 
+  // Combine dbUsers + cloudUsers deduplicated
+  const allUsersMap = new Map<string, MexoUser>();
+  dbUsers.forEach((u) => allUsersMap.set(u.email.toLowerCase(), u));
+  cloudUsers.forEach((u) => {
+    if (!allUsersMap.has(u.email.toLowerCase())) {
+      allUsersMap.set(u.email.toLowerCase(), u);
+    }
+  });
+  const combinedUsers = Array.from(allUsersMap.values());
+
   // Combine suggestions with profile photo (avatar) resolution
-  const suggestions: { name: string; email: string; avatar?: string; isGroup?: boolean }[] = [];
+  const suggestions: { name: string; email: string; username?: string; avatar?: string; isGroup?: boolean }[] = [];
 
   groups.forEach((g) => {
     suggestions.push({ name: g.name, email: g.address, isGroup: true });
   });
 
   contacts.forEach((c) => {
-    const matchedUser = users.find((u) => u.email.toLowerCase() === c.email.toLowerCase());
+    const matchedUser = combinedUsers.find((u) => u.email.toLowerCase() === c.email.toLowerCase());
     suggestions.push({
       name: `${c.firstName} ${c.lastName}`.trim() || c.displayName || c.email,
       email: c.email,
+      username: matchedUser?.username,
       avatar: matchedUser?.avatarUrl || c.avatarUrl,
     });
   });
 
-  users.forEach((u) => {
+  combinedUsers.forEach((u) => {
     if (!suggestions.some((s) => s.email.toLowerCase() === u.email.toLowerCase())) {
       suggestions.push({
-        name: `${u.firstName} ${u.lastName}`.trim() || u.email,
+        name: `${u.firstName} ${u.lastName}`.trim() || u.username || u.email,
         email: u.email,
+        username: u.username,
         avatar: u.avatarUrl,
       });
     }
@@ -68,7 +94,11 @@ export const RecipientInput: React.FC<RecipientInputProps> = ({
     if (recipients.includes(s.email.toLowerCase())) return false;
     if (!inputValue.trim()) return true;
     const clean = inputValue.toLowerCase().trim();
-    return s.name.toLowerCase().includes(clean) || s.email.toLowerCase().includes(clean);
+    return (
+      s.name.toLowerCase().includes(clean) ||
+      s.email.toLowerCase().includes(clean) ||
+      (s.username && s.username.toLowerCase().includes(clean))
+    );
   });
 
   const addRecipient = (emailToAdd: string) => {

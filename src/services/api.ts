@@ -518,7 +518,7 @@ export const api = {
   },
 
   async sendMessage(params: {
-    senderUserId: string;
+    senderUserId?: string;
     senderEmail: string;
     senderName: string;
     recipients: string[];
@@ -531,11 +531,25 @@ export const api = {
       const cleanSender = params.senderEmail.trim().toLowerCase();
       const bodyText = params.bodyHtml.replace(/<[^>]*>?/gm, '');
 
+      let validSenderUuid: string | null = null;
+      if (params.senderUserId && /^[0-9a-fA-F-]{36}$/.test(params.senderUserId)) {
+        validSenderUuid = params.senderUserId;
+      } else {
+        const { data: senderProf } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('primary_address', cleanSender)
+          .maybeSingle();
+        if (senderProf?.id) {
+          validSenderUuid = senderProf.id;
+        }
+      }
+
       // 1. Insert master message
       const { data: msgData, error: msgErr } = await supabase
         .from('messages')
         .insert({
-          sender_user_id: params.senderUserId,
+          sender_user_id: validSenderUuid,
           sender_address: cleanSender,
           subject: params.subject || '(no subject)',
           body_html: params.bodyHtml,
@@ -551,12 +565,14 @@ export const api = {
       }
 
       // 2. Insert message state for sender (sent folder)
-      await supabase.from('message_states').insert({
-        message_id: msgData.id,
-        user_id: params.senderUserId,
-        folder: 'sent',
-        is_read: true,
-      });
+      if (validSenderUuid) {
+        await supabase.from('message_states').insert({
+          message_id: msgData.id,
+          user_id: validSenderUuid,
+          folder: 'sent',
+          is_read: true,
+        });
+      }
 
       // 3. Resolve recipients & create inbox states for recipients
       for (const recip of params.recipients) {
