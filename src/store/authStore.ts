@@ -39,6 +39,8 @@ interface AuthStore {
   initializeAuth: () => Promise<void>;
 }
 
+const STORAGE_KEY_ACTIVE_USER = 'mexo_active_user';
+
 export const useAuthStore = create<AuthStore>((set, get) => ({
   currentUser: DEFAULT_GUEST_USER,
   isAuthenticated: false,
@@ -48,28 +50,46 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   initializeAuth: async () => {
     try {
       set({ isLoading: true, error: null });
+
+      // 1. Check active Supabase session
       const { data: sessionData } = await supabase.auth.getSession();
       const sessionUser = sessionData?.session?.user;
 
       if (sessionUser) {
         let profile = await api.getCurrentUserProfile(sessionUser.id);
-        if (!profile) {
-          const email = sessionUser.email || 'user@mexo.com';
-          const username = email.split('@')[0];
-          const created = await api.createUserAccount({
-            firstName: username,
-            lastName: '',
-            username,
-          });
-          profile = created.user;
+        if (!profile && sessionUser.email) {
+          profile = await api.getUserProfileByEmail(sessionUser.email);
         }
-
         if (profile && profile.status !== 'suspended') {
+          localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
           set({ currentUser: profile, isAuthenticated: true, isLoading: false });
           return;
         }
       }
 
+      // 2. Check localStorage persisted user session (for page reloads & offline resilience)
+      const cachedUserRaw = localStorage.getItem(STORAGE_KEY_ACTIVE_USER);
+      if (cachedUserRaw) {
+        try {
+          const cachedUser = JSON.parse(cachedUserRaw) as MexoUser;
+          if (cachedUser && cachedUser.id && cachedUser.email && cachedUser.status !== 'suspended') {
+            set({ currentUser: cachedUser, isAuthenticated: true, isLoading: false });
+            // Asynchronously refresh user profile from database in background if available
+            api.getUserProfileByEmail(cachedUser.email).then((dbProfile) => {
+              if (dbProfile && dbProfile.status !== 'suspended') {
+                localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(dbProfile));
+                set({ currentUser: dbProfile });
+              }
+            }).catch(() => {});
+            return;
+          }
+        } catch (e) {
+          console.warn('Failed to parse cached user:', e);
+          localStorage.removeItem(STORAGE_KEY_ACTIVE_USER);
+        }
+      }
+
+      // 3. New / Unauthenticated user
       set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false });
     } catch (err) {
       console.error('Auth initialization failed:', err);
@@ -113,6 +133,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
       // Successful sign in if profile exists and is active
       if (profile && profile.status !== 'suspended') {
+        localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(profile));
         set({ currentUser: profile, isAuthenticated: true, isLoading: false });
         await api.addAuditLog(profile.email, 'USER_SIGN_IN', profile.email, 'success');
         return true;
@@ -145,6 +166,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const pwd = data.password || data.username.toLowerCase().trim();
       await supabase.auth.signInWithPassword({ email: primaryEmail, password: pwd });
 
+      localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(result.user));
       set({ currentUser: result.user, isAuthenticated: true, isLoading: false });
       return result.user;
     } catch (err: any) {
@@ -158,6 +180,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (current && current.email !== 'guest@mexo.com') {
       await api.addAuditLog(current.email, 'USER_SIGN_OUT', current.email, 'success');
     }
+    localStorage.removeItem(STORAGE_KEY_ACTIVE_USER);
     await supabase.auth.signOut();
     set({ currentUser: DEFAULT_GUEST_USER, isAuthenticated: false, isLoading: false, error: null });
   },
@@ -167,6 +190,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (!current || current.id === 'guest-user') return;
     const updated = await api.updateUserProfile(current.id, updates);
     if (updated) {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_USER, JSON.stringify(updated));
       set({ currentUser: updated });
     }
   },

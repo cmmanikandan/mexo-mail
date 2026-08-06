@@ -30,8 +30,19 @@ const MONTHS = [
 
 export const SignUpPage: React.FC = () => {
   const navigate = useNavigate();
-  const { signUp } = useAuthStore();
+  const { signUp, isAuthenticated, currentUser, isLoading: authLoading } = useAuthStore();
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5 | 6 | 7 | 8>(1);
+
+  // Auto-redirect if user is already authenticated
+  useEffect(() => {
+    if (!authLoading && isAuthenticated && currentUser) {
+      if (currentUser.role === 'system_admin') {
+        navigate('/admin', { replace: true });
+      } else {
+        navigate('/mail/inbox', { replace: true });
+      }
+    }
+  }, [isAuthenticated, currentUser, authLoading, navigate]);
 
   // Form State
   const [firstName, setFirstName] = useState('');
