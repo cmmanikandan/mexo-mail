@@ -75,7 +75,7 @@ export const INITIAL_USERS: MexoUser[] = [
     firstName: 'System',
     lastName: 'Administrator',
     role: 'system_admin',
-    password: 'admin',
+    password: 'MexoAdmin#2026!SecureKey',
     recoveryEmail: 'sec-admin@mexo.com',
     status: 'active',
     storageUsedBytes: 512 * 1024 * 1024,

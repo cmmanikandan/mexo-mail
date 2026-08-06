@@ -130,36 +130,80 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       const cleanEmail = await api.resolveUsernameToEmail(emailOrUsername);
       const cleanPassword = passwordInput.trim();
 
+      if (!cleanEmail || !cleanPassword) {
+        set({ error: 'Please enter your email/username and password.', isLoading: false });
+        return false;
+      }
+
+      let profile: MexoUser | null = null;
+      let isAuthSuccess = false;
+
+      // 1. Try Supabase Auth authentication first
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: cleanEmail,
         password: cleanPassword,
       });
 
-      let profile: MexoUser | null = null;
-
-      if (authData?.user?.id) {
+      if (!authError && authData?.user?.id) {
         profile = await api.getCurrentUserProfile(authData.user.id);
+        if (!profile && authData.user.email) {
+          profile = await api.getUserProfileByEmail(authData.user.email);
+        }
+        if (profile) {
+          isAuthSuccess = true;
+        }
       }
 
-      // Profile fallback via database search by primary address or username
-      if (!profile) {
-        profile = await api.getUserProfileByEmail(cleanEmail);
+      // 2. Strict Fallback Check: Verify password against DB candidate profile
+      if (!isAuthSuccess) {
+        const dbCandidate = await api.getUserProfileByEmail(cleanEmail);
+        if (dbCandidate) {
+          const isSystemAdmin = dbCandidate.role === 'system_admin' || cleanEmail.toLowerCase() === 'admin@mexo.com';
+
+          if (isSystemAdmin) {
+            // Require tough admin password for System Admin login
+            const isToughAdminMatch = cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure';
+            if (isToughAdminMatch) {
+              profile = dbCandidate;
+              isAuthSuccess = true;
+            } else {
+              set({ error: 'Invalid email/username or password.', isLoading: false });
+              await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
+              return false;
+            }
+          } else {
+            // Standard user password verification (must match password or default username)
+            const expectedPassword = dbCandidate.password || dbCandidate.username;
+            if (cleanPassword === expectedPassword || cleanPassword === dbCandidate.username) {
+              profile = dbCandidate;
+              isAuthSuccess = true;
+            } else {
+              set({ error: 'Invalid email/username or password.', isLoading: false });
+              await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
+              return false;
+            }
+          }
+        }
       }
 
-      // Admin fallback if account profile does not exist yet
-      if (!profile && cleanEmail === 'admin@mexo.com' && (cleanPassword === 'admin' || cleanPassword === 'admin123')) {
-        const createdAdmin = await api.createUserAccount({
-          firstName: 'Admin',
-          lastName: 'System',
-          username: 'admin',
-          password: cleanPassword,
-          role: 'system_admin',
-        });
-        profile = createdAdmin.user;
+      // 3. Admin auto-creation fallback with tough password ONLY
+      if (!isAuthSuccess && cleanEmail === 'admin@mexo.com') {
+        const isToughAdminMatch = cleanPassword === 'MexoAdmin#2026!SecureKey' || cleanPassword === 'admin123#Secure';
+        if (isToughAdminMatch) {
+          const createdAdmin = await api.createUserAccount({
+            firstName: 'Admin',
+            lastName: 'System',
+            username: 'admin',
+            password: cleanPassword,
+            role: 'system_admin',
+          });
+          profile = createdAdmin.user;
+          if (profile) isAuthSuccess = true;
+        }
       }
 
-      // Successful sign in if profile exists and is active
-      if (profile && profile.status !== 'suspended') {
+      // 4. Authenticate session if password check passed and profile is active
+      if (isAuthSuccess && profile && profile.status !== 'suspended') {
         const cleanInputUsername = emailOrUsername.trim().toLowerCase().split('@')[0];
         const isDefaultPassword = cleanPassword.toLowerCase() === profile.username.toLowerCase() || cleanPassword.toLowerCase() === cleanInputUsername;
 
@@ -182,16 +226,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         return true;
       }
 
-      const errMsg = authError?.message === 'Email not confirmed' 
-        ? 'Email not confirmed by Supabase Auth server. Bypassed for active DB profile.' 
-        : (authError?.message || 'Invalid credentials or account unavailable.');
-
-      set({ error: errMsg, isLoading: false });
+      set({ error: 'Invalid email/username or password.', isLoading: false });
       await api.addAuditLog(cleanEmail, 'USER_SIGN_IN_FAILED', cleanEmail, 'failed');
       return false;
     } catch (err: any) {
       console.error('SignIn failed:', err);
-      set({ error: err?.message || 'Sign in failed', isLoading: false });
+      set({ error: 'Invalid email/username or password.', isLoading: false });
       return false;
     }
   },
