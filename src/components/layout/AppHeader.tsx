@@ -5,6 +5,7 @@ import { useUIStore } from '../../store/uiStore';
 import { useMailStore } from '../../store/mailStore';
 import { MexoAvatar } from '../common/MexoAvatar';
 import { PWAInstallButton } from '../common/PWAInstallButton';
+import { MexoAppsLauncher } from './MexoAppsLauncher';
 import { MobileMailDrawer } from './MobileMailDrawer';
 import { db } from '../../services/db';
 import {
@@ -188,6 +189,8 @@ export const AppHeader: React.FC = () => {
           >
             <Settings className="w-5 h-5" />
           </button>
+
+          <MexoAppsLauncher />
 
           <PWAInstallButton className="hidden sm:flex" />
 
