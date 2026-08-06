@@ -43,6 +43,15 @@ export const AdminUsersPage: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // CSV import state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvRows, setCsvRows] = useState<{ fn: string; ln: string; un: string; pwd: string; role: string }[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);       // 0–100
+  const [importCurrentIdx, setImportCurrentIdx] = useState(0);
+  const [importTotal, setImportTotal] = useState(0);
+  const [importResult, setImportResult] = useState<{ success: number; failed: number; errors: string[] } | null>(null);
+
   // Add User Form State
   const [addFirstName, setAddFirstName] = useState('');
   const [addLastName, setAddLastName] = useState('');
@@ -242,45 +251,82 @@ export const AdminUsersPage: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const handleCsvFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Parse CSV file — only stores rows, does NOT import yet
+  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setCsvFile(file);
+    setCsvRows([]);
+    setImportResult(null);
 
     const reader = new FileReader();
-    reader.onload = async (evt) => {
+    reader.onload = (evt) => {
       const content = evt.target?.result as string;
       if (!content) return;
-
       const lines = content.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
       if (lines.length <= 1) {
-        addToast({ message: 'CSV file is empty or missing data rows.', type: 'error' });
+        addToast({ message: 'CSV file is empty or has no data rows.', type: 'error' });
+        setCsvFile(null);
         return;
       }
+      const parsed = lines.slice(1).map((line) => {
+        const parts = line.split(',').map((p) => p.trim());
+        const [fn, ln, un, pwd, role] = parts;
+        return { fn: fn || '', ln: ln || '', un: un || '', pwd: pwd || '', role: role || 'user' };
+      }).filter((r) => r.fn && r.ln && r.un && r.pwd);
 
-      let importedCount = 0;
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',').map((p) => p.trim());
-        if (parts.length >= 4) {
-          const [fn, ln, un, pwd, role] = parts;
-          if (fn && ln && un && pwd) {
-            const res = await api.createUserAccount({
-              firstName: fn,
-              lastName: ln,
-              username: un,
-              password: pwd,
-              role: role === 'system_admin' ? 'system_admin' : 'user',
-            });
-            if (res.user) importedCount++;
-          }
-        }
+      if (parsed.length === 0) {
+        addToast({ message: 'No valid rows found. Check the CSV format.', type: 'error' });
+        setCsvFile(null);
+        return;
       }
-
-      await fetchUsers();
-      addToast({ message: `Successfully imported ${importedCount} user account(s) to cloud database!`, type: 'success' });
-      setIsImportModalOpen(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      setCsvRows(parsed);
     };
     reader.readAsText(file);
+  };
+
+  // Actually imports parsed rows one-by-one with progress
+  const handleStartImport = async () => {
+    if (csvRows.length === 0 || isImporting) return;
+    setIsImporting(true);
+    setImportProgress(0);
+    setImportCurrentIdx(0);
+    setImportTotal(csvRows.length);
+    setImportResult(null);
+
+    let success = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (let i = 0; i < csvRows.length; i++) {
+      const { fn, ln, un, pwd, role } = csvRows[i];
+      setImportCurrentIdx(i + 1);
+      setImportProgress(Math.round(((i) / csvRows.length) * 100));
+      try {
+        const res = await api.createUserAccount({
+          firstName: fn,
+          lastName: ln,
+          username: un,
+          password: pwd,
+          role: role === 'system_admin' ? 'system_admin' : 'user',
+        });
+        if (res.user) {
+          success++;
+        } else {
+          failed++;
+          errors.push(`${un}@mexo.com — ${res.error || 'Unknown error'}`);
+        }
+      } catch (err: any) {
+        failed++;
+        errors.push(`${un}@mexo.com — ${err?.message || 'Failed'}`);
+      }
+    }
+
+    setImportProgress(100);
+    setImportResult({ success, failed, errors });
+    setIsImporting(false);
+    await fetchUsers();
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -635,44 +681,176 @@ export const AdminUsersPage: React.FC = () => {
       {isImportModalOpen && (
         <MexoModal
           isOpen={isImportModalOpen}
-          onClose={() => setIsImportModalOpen(false)}
+          onClose={() => {
+            if (isImporting) return; // prevent close during import
+            setIsImportModalOpen(false);
+            setCsvFile(null);
+            setCsvRows([]);
+            setImportResult(null);
+            setImportProgress(0);
+          }}
           title="Import Users via CSV"
+          maxWidth="md"
         >
           <div className="space-y-5">
             <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-              Upload a CSV file containing user accounts to import them in bulk into MEXO Mail database.
+              Upload a CSV file to create multiple user accounts at once. Each row is imported individually with live progress.
             </p>
 
-            <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 text-xs space-y-2">
-              <p className="font-extrabold text-[#7C3AED]">Step 1: Download CSV Template</p>
+            {/* Step 1: Template */}
+            <div className="p-3.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-xs space-y-2">
+              <p className="font-extrabold text-[#7C3AED]">Step 1 — Download CSV Template</p>
+              <p className="text-slate-500 dark:text-slate-400">Format: <span className="font-mono bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded">first_name, last_name, username, password, role</span></p>
               <button
                 onClick={handleDownloadCsvTemplate}
-                className="px-3.5 py-1.5 rounded-lg bg-[#7C3AED] text-white font-bold text-xs inline-flex items-center space-x-1.5 shadow-xs cursor-pointer"
+                className="px-3.5 py-1.5 rounded-lg bg-[#7C3AED] text-white font-bold text-xs inline-flex items-center space-x-1.5 shadow-xs cursor-pointer hover:opacity-90"
               >
                 <Download className="w-3.5 h-3.5" />
                 <span>Download Template (.CSV)</span>
               </button>
             </div>
 
+            {/* Step 2: Select file */}
             <div className="space-y-2">
-              <p className="font-extrabold text-xs text-slate-900 dark:text-slate-100">Step 2: Upload CSV File</p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                onChange={handleCsvFileUpload}
-                className="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-[#7C3AED] file:text-white cursor-pointer"
-              />
+              <p className="font-extrabold text-xs text-slate-900 dark:text-slate-100">Step 2 — Select CSV File</p>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white font-bold text-xs cursor-pointer hover:opacity-90 transition-opacity shadow-sm">
+                  <FileSpreadsheet className="w-3.5 h-3.5" />
+                  <span>Browse...</span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    onChange={handleCsvFileChange}
+                    className="hidden"
+                    disabled={isImporting}
+                  />
+                </label>
+                {csvFile && (
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 flex-shrink-0" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate">{csvFile.name}</span>
+                    <span className="text-xs text-slate-400 flex-shrink-0">({csvRows.length} user{csvRows.length !== 1 ? 's' : ''})</span>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex justify-end pt-2 border-t border-app-border">
-              <button
-                onClick={() => setIsImportModalOpen(false)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100"
-              >
-                Close
-              </button>
-            </div>
+            {/* Step 3: Import button (only shown when file is loaded and not yet importing/done) */}
+            {csvRows.length > 0 && !isImporting && !importResult && (
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-app-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-extrabold text-xs text-slate-900 dark:text-slate-100">Ready to import</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                      {csvRows.length} account{csvRows.length !== 1 ? 's' : ''} will be created in the cloud database.
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleStartImport}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white font-extrabold text-xs shadow-lg hover:opacity-90 transition-opacity cursor-pointer"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Import {csvRows.length} User{csvRows.length !== 1 ? 's' : ''}</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Progress during import */}
+            {isImporting && (
+              <div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 space-y-3">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <span className="text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    Importing users...
+                  </span>
+                  <span className="font-mono text-indigo-600 dark:text-indigo-400">
+                    {importCurrentIdx} / {importTotal}
+                  </span>
+                </div>
+                <div className="h-2.5 bg-indigo-100 dark:bg-indigo-900 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-[#7C3AED] to-[#0878e8] rounded-full transition-all duration-300"
+                    style={{ width: `${importProgress}%` }}
+                  />
+                </div>
+                <p className="text-[10px] text-indigo-500 dark:text-indigo-400 text-center">
+                  Please wait — do not close this window
+                </p>
+              </div>
+            )}
+
+            {/* Result summary */}
+            {importResult && (
+              <div className={`p-4 rounded-xl border space-y-3 ${
+                importResult.failed === 0
+                  ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800'
+                  : 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800'
+              }`}>
+                <div className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                    importResult.failed === 0 ? 'bg-emerald-100 dark:bg-emerald-900' : 'bg-amber-100 dark:bg-amber-900'
+                  }`}>
+                    {importResult.failed === 0
+                      ? <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      : <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    }
+                  </div>
+                  <div className="flex-1">
+                    <p className={`font-extrabold text-sm ${
+                      importResult.failed === 0 ? 'text-emerald-800 dark:text-emerald-200' : 'text-amber-800 dark:text-amber-200'
+                    }`}>
+                      Import Complete
+                    </p>
+                    <div className="flex items-center gap-4 mt-1">
+                      <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                        ✓ {importResult.success} added
+                      </span>
+                      {importResult.failed > 0 && (
+                        <span className="text-xs font-bold text-rose-600 dark:text-rose-400">
+                          ✗ {importResult.failed} failed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Error details */}
+                {importResult.errors.length > 0 && (
+                  <div className="bg-white/60 dark:bg-slate-900/40 rounded-lg p-2.5 space-y-1 max-h-28 overflow-y-auto">
+                    {importResult.errors.map((err, i) => (
+                      <p key={i} className="text-[10px] font-mono text-rose-600 dark:text-rose-400 leading-relaxed">{err}</p>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  onClick={() => {
+                    setIsImportModalOpen(false);
+                    setCsvFile(null);
+                    setCsvRows([]);
+                    setImportResult(null);
+                    setImportProgress(0);
+                  }}
+                  className="w-full py-2 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white font-extrabold text-xs hover:opacity-90 transition-opacity"
+                >
+                  Done
+                </button>
+              </div>
+            )}
+
+            {/* Footer */}
+            {!isImporting && !importResult && (
+              <div className="flex justify-end pt-2 border-t border-app-border">
+                <button
+                  onClick={() => { setIsImportModalOpen(false); setCsvFile(null); setCsvRows([]); }}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </div>
         </MexoModal>
       )}
