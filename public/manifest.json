@@ -21,6 +21,5 @@
   "background_color": "#ffffff",
   "theme_color": "#7C3AED",
   "display": "standalone",
-  "orientation": "any",
   "categories": ["productivity", "utilities"]
 }

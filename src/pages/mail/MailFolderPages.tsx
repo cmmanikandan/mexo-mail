@@ -63,13 +63,20 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
     }
 
     const now = Date.now();
-    return messages.filter((msg) => {
+    const rawFiltered = messages.filter((msg) => {
       const st = msg.userState;
-      // A message is "snoozed" only if the snooze time is still in the future
       const isSnoozedActive = st.snoozedUntil ? new Date(st.snoozedUntil).getTime() > now : false;
+      const cleanUserEmail = currentUser.email.toLowerCase();
+      const isSentByMeToOthersOnly =
+        msg.senderEmail.toLowerCase() === cleanUserEmail &&
+        !msg.recipients.some((r) => {
+          const cleanR = r.toLowerCase().trim();
+          return cleanR === cleanUserEmail || cleanR === currentUser.username.toLowerCase();
+        });
+
       switch (activeFolder) {
         case 'inbox':
-          return !st.isArchived && !st.isDeleted && !st.isSpam && !isSnoozedActive;
+          return !st.isArchived && !st.isDeleted && !st.isSpam && !isSnoozedActive && !isSentByMeToOthersOnly;
         case 'starred':
           return st.isStarred && !st.isDeleted;
         case 'snoozed':
@@ -77,9 +84,9 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
         case 'important':
           return st.isImportant && !st.isDeleted;
         case 'sent':
-          return msg.senderEmail.toLowerCase() === currentUser.email.toLowerCase() && !st.isDeleted;
+          return msg.senderEmail.toLowerCase() === cleanUserEmail && !st.isDeleted;
         case 'scheduled':
-          return false; // Scheduled messages are separate (ScheduledMessage type)
+          return false; // Scheduled messages are separate
         case 'archive':
           return st.isArchived && !st.isDeleted && !st.isSpam;
         case 'all':
@@ -91,6 +98,14 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
         default:
           return !st.isDeleted;
       }
+    });
+
+    // Deduplicate by message ID to guarantee unique message rendering
+    const seen = new Set<string>();
+    return rawFiltered.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
     });
   }, [activeFolder, activeLabelId, effectiveQuery, lastUpdated]);
 

@@ -14,6 +14,7 @@ export interface ComposeInstance {
   isMinimized: boolean;
   isMaximized: boolean;
   isSaving: boolean;
+  isSending?: boolean;
   lastSavedAt?: string;
 }
 
@@ -46,6 +47,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
       isMinimized: false,
       isMaximized: false,
       isSaving: false,
+      isSending: false,
       draftId: initialData?.draftId,
     };
     set((state) => ({

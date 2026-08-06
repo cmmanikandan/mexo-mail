@@ -161,11 +161,22 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     });
   };
 
-  const handleSendNow = () => {
+  const handleSendNow = (e?: React.SyntheticEvent) => {
+    if (e) e.preventDefault();
+    if (instance.isSending) return;
+    if (isUploading) {
+      addToast({ message: 'Please wait for attachment upload to complete.', type: 'warning' });
+      return;
+    }
     if (instance.to.length === 0) {
       addToast({ message: 'Please specify at least one recipient.', type: 'warning' });
       return;
     }
+
+    updateCompose(instance.id, { isSending: true });
+
+    // Unique client idempotency key for send operation
+    const clientMessageId = `msg-send-${instance.id}-${Date.now()}`;
 
     const createdMessages = db.sendMessage({
       senderName: currentUser.firstName ? `${currentUser.firstName} ${currentUser.lastName}` : currentUser.email,
@@ -174,7 +185,10 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       subject: instance.subject || '(No Subject)',
       bodyHtml: instance.bodyHtml,
       attachments: instance.attachments,
+      clientMessageId,
     });
+
+    useMailStore.getState().triggerRefresh();
 
     // Broadcast to all tabs + trigger same-tab refresh immediately
     realtimeService.broadcastRefresh();
@@ -419,10 +433,21 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
           {/* Split Send Button */}
           <div className="inline-flex rounded-xl shadow-md overflow-hidden">
             <button
+              type="button"
+              disabled={instance.isSending || isUploading}
               onClick={handleSendNow}
-              className="px-4 py-2 bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] hover:opacity-95 text-white text-xs font-bold flex items-center transition-all active:scale-98"
+              className="px-4 py-2 bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] hover:opacity-95 text-white text-xs font-bold flex items-center transition-all active:scale-98 disabled:opacity-50 disabled:cursor-not-allowed min-h-[36px]"
             >
-              <Send className="w-3.5 h-3.5 mr-1.5" /> Send
+              {instance.isSending ? (
+                <>
+                  <span className="w-3.5 h-3.5 mr-1.5 border-2 border-white border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="w-3.5 h-3.5 mr-1.5" /> Send
+                </>
+              )}
             </button>
             <button
               onClick={() => setIsScheduleModalOpen(true)}

@@ -11,6 +11,8 @@ import { MexoButton } from '../../components/common/MexoButton';
 import { AppHeader } from '../../components/layout/AppHeader';
 import { ComposeContainer } from '../../components/compose/ComposeModal';
 import { MexoToastContainer } from '../../components/common/MexoToast';
+import { ChangePasswordModal } from '../../components/account/ChangePasswordModal';
+import { PasswordChangeSuggestionBanner } from '../../components/account/PasswordChangeSuggestionBanner';
 import {
   Shield,
   Monitor,
@@ -69,8 +71,13 @@ const MobileAccountHome: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto pb-8">
+        {/* Security Password Suggestion Banner */}
+        <div className="px-4 pt-4">
+          <PasswordChangeSuggestionBanner />
+        </div>
+
         {/* Identity Header */}
-        <div className="flex flex-col items-center text-center px-6 pt-8 pb-6">
+        <div className="flex flex-col items-center text-center px-6 pt-6 pb-6">
           <div
             className="relative group cursor-pointer mb-4"
             onClick={() => navigate('/account/personal-info')}
@@ -143,6 +150,9 @@ const DesktopAccountOverview: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Security Password Suggestion Banner */}
+      <PasswordChangeSuggestionBanner />
+
       {/* Identity card */}
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-app-border p-6 shadow-mexo-sm flex items-center gap-5">
         <MexoAvatar
@@ -184,6 +194,70 @@ const DesktopAccountOverview: React.FC = () => {
           </button>
         ))}
       </div>
+    </div>
+  );
+};
+
+// Security Subview Component
+const SecurityView: React.FC = () => {
+  const { currentUser } = useAuthStore();
+  const [isChangeModalOpen, setIsChangeModalOpen] = useState(false);
+
+  return (
+    <div className="space-y-6 mx-4 md:mx-0">
+      <PasswordChangeSuggestionBanner />
+
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-app-border p-5 md:p-8 shadow-mexo-sm space-y-6">
+        <div>
+          <h2 className="text-lg font-extrabold text-app-heading flex items-center">
+            <Lock className="w-5 h-5 text-emerald-600 mr-2" /> Security Dashboard
+          </h2>
+          <p className="text-xs text-app-body mt-1">Manage your credentials, 2-step verification, and login activity.</p>
+        </div>
+        <div className="space-y-3 text-xs">
+          <div className="p-4 rounded-xl border border-app-border flex items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-800/30">
+            <div>
+              <h4 className="font-bold text-app-heading flex items-center">
+                Password
+                {(currentUser.requiresPasswordChange || currentUser.createdByAdmin) && (
+                  <span className="ml-2 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300">
+                    Update Recommended
+                  </span>
+                )}
+              </h4>
+              <p className="text-[11px] text-app-muted mt-0.5">
+                {currentUser.requiresPasswordChange || currentUser.createdByAdmin
+                  ? 'Temporary admin-assigned password in use'
+                  : 'Protected by MEXO Account identity'}
+              </p>
+            </div>
+            <MexoButton onClick={() => setIsChangeModalOpen(true)} variant="outline" size="sm">
+              Change Password
+            </MexoButton>
+          </div>
+          <div className="p-4 rounded-xl border border-app-border flex items-center justify-between gap-3">
+            <div>
+              <h4 className="font-bold text-app-heading">Two-Step Verification (2FA)</h4>
+              <p className="text-[11px] text-app-muted mt-0.5">Extra authentication security layer.</p>
+            </div>
+            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex-shrink-0">
+              {currentUser.twoFactorEnabled ? 'On' : 'Off'}
+            </span>
+          </div>
+          <div className="pt-4 border-t border-app-border">
+            <h4 className="font-bold text-app-heading mb-2">Security Audit Log</h4>
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 flex items-center space-x-2 text-xs text-app-muted">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+              <span>No security incidents detected. Account status is optimal.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ChangePasswordModal
+        isOpen={isChangeModalOpen}
+        onClose={() => setIsChangeModalOpen(false)}
+      />
     </div>
   );
 };
@@ -245,43 +319,7 @@ export const AccountPage: React.FC = () => {
   const renderContent = () => {
     if (isPersonal) return <PersonalInfoView />;
 
-    if (isSecurity) return (
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-app-border p-5 md:p-8 shadow-mexo-sm space-y-6 mx-4 md:mx-0">
-        <div>
-          <h2 className="text-lg font-extrabold text-app-heading flex items-center">
-            <Lock className="w-5 h-5 text-emerald-600 mr-2" /> Security Dashboard
-          </h2>
-          <p className="text-xs text-app-body mt-1">Manage your credentials, 2-step verification, and login activity.</p>
-        </div>
-        <div className="space-y-3 text-xs">
-          <div className="p-4 rounded-xl border border-app-border flex items-center justify-between gap-3">
-            <div>
-              <h4 className="font-bold text-app-heading">Password</h4>
-              <p className="text-[11px] text-app-muted mt-0.5">Protected by MEXO Account identity</p>
-            </div>
-            <MexoButton onClick={() => addToast({ message: 'Password reset link sent.', type: 'info' })} variant="outline" size="sm">
-              Change
-            </MexoButton>
-          </div>
-          <div className="p-4 rounded-xl border border-app-border flex items-center justify-between gap-3">
-            <div>
-              <h4 className="font-bold text-app-heading">Two-Step Verification (2FA)</h4>
-              <p className="text-[11px] text-app-muted mt-0.5">Extra authentication security layer.</p>
-            </div>
-            <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 flex-shrink-0">
-              {currentUser.twoFactorEnabled ? 'On' : 'Off'}
-            </span>
-          </div>
-          <div className="pt-4 border-t border-app-border">
-            <h4 className="font-bold text-app-heading mb-2">Security Audit Log</h4>
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 flex items-center space-x-2 text-xs text-app-muted">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-              <span>No security incidents detected. Account status is optimal.</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    if (isSecurity) return <SecurityView />;
 
     if (isSessions) return (
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-app-border p-5 md:p-8 shadow-mexo-sm space-y-5 mx-4 md:mx-0">

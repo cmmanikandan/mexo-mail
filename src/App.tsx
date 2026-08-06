@@ -103,13 +103,21 @@ const RoutePageTitle: React.FC = () => {
   return null;
 };
 
+const RootRoute: React.FC = () => {
+  const { isAuthenticated } = useAuthStore();
+  if (isAuthenticated) {
+    return <Navigate to="/mail/inbox" replace />;
+  }
+  return <LandingPage />;
+};
+
 export const AppContent: React.FC = () => {
   return (
     <>
       <RoutePageTitle />
       <Routes>
-        {/* Landing Page */}
-        <Route path="/" element={<LandingPage />} />
+        {/* Landing Page for unauthenticated users, direct Inbox for authenticated users */}
+        <Route path="/" element={<RootRoute />} />
 
         {/* Auth Routes */}
         <Route path="/login" element={<Navigate to="/signin" replace />} />

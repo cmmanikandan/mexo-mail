@@ -19,6 +19,8 @@ export interface MexoUser {
   createdAt: string;
   lastActiveAt: string;
   twoFactorEnabled: boolean;
+  requiresPasswordChange?: boolean;
+  createdByAdmin?: boolean;
 }
 
 export interface UserSession {

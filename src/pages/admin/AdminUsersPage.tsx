@@ -89,13 +89,19 @@ export const AdminUsersPage: React.FC = () => {
       lastName: addLastName.trim(),
       username: addUsername.trim(),
       password: addPassword.trim(),
+      createdByAdmin: true,
+      requiresPasswordChange: true,
     });
 
-    db.updateUser(newUser.id, { role: addRole });
+    db.updateUser(newUser.id, {
+      role: addRole,
+      createdByAdmin: true,
+      requiresPasswordChange: true,
+    });
     db.addAuditLog('admin@mexo.com', 'USER_CREATED_BY_ADMIN', newUser.email, 'success');
 
     refreshUsers();
-    addToast({ message: `User ${newUser.email} created successfully!`, type: 'success' });
+    addToast({ message: `User ${newUser.email} created successfully! Password update required on first login.`, type: 'success' });
     setIsAddUserOpen(false);
 
     // Reset Form
@@ -110,10 +116,13 @@ export const AdminUsersPage: React.FC = () => {
     e.preventDefault();
     if (!selectedUserForPassword || !newPassword.trim()) return;
 
-    db.updateUser(selectedUserForPassword.id, { password: newPassword.trim() });
+    db.updateUser(selectedUserForPassword.id, {
+      password: newPassword.trim(),
+      requiresPasswordChange: true,
+    });
     db.addAuditLog('admin@mexo.com', 'PASSWORD_RESET_BY_ADMIN', selectedUserForPassword.email, 'success');
     refreshUsers();
-    addToast({ message: `Password updated for ${selectedUserForPassword.email}`, type: 'success' });
+    addToast({ message: `Password updated for ${selectedUserForPassword.email}. User will be prompted to change password.`, type: 'success' });
     setSelectedUserForPassword(null);
     setNewPassword('');
   };

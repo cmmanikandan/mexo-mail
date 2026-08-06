@@ -285,6 +285,8 @@ class MexoDatabase {
     dob?: string;
     gender?: string;
     avatarUrl?: string;
+    createdByAdmin?: boolean;
+    requiresPasswordChange?: boolean;
   }): MexoUser {
     const users = this.getUsers();
     const newUser: MexoUser = {
@@ -299,6 +301,8 @@ class MexoDatabase {
       dob: userData.dob,
       gender: userData.gender,
       avatarUrl: userData.avatarUrl,
+      createdByAdmin: userData.createdByAdmin,
+      requiresPasswordChange: userData.requiresPasswordChange,
       status: 'active',
       storageUsedBytes: 0,
       storageLimitBytes: 15 * 1024 * 1024 * 1024,
@@ -321,6 +325,18 @@ class MexoDatabase {
     users[idx] = { ...users[idx], ...updates };
     localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
     return users[idx];
+  }
+
+  changeUserPassword(userId: string, newPassword: string): MexoUser | undefined {
+    const updated = this.updateUser(userId, {
+      password: newPassword,
+      requiresPasswordChange: false,
+      createdByAdmin: false,
+    });
+    if (updated) {
+      this.addAuditLog(updated.email, 'USER_PASSWORD_CHANGED', updated.email, 'success');
+    }
+    return updated;
   }
 
   deleteUser(id: string): boolean {
@@ -401,12 +417,36 @@ class MexoDatabase {
 
   getMessagesForUser(userEmail: string): Message[] {
     const all = this.getMessages();
-    const cleanEmail = userEmail.toLowerCase();
-    return all.filter((m) => {
-      const isSender = m.senderEmail.toLowerCase() === cleanEmail;
-      const isRecipient = m.recipients.some((r) => r.toLowerCase() === cleanEmail);
-      return isSender || isRecipient;
-    });
+    let cleanEmail = userEmail.toLowerCase().trim();
+    if (!cleanEmail.includes('@')) {
+      cleanEmail = `${cleanEmail}@mexo.com`;
+    }
+
+    const userMessages: Message[] = [];
+    const seenIds = new Set<string>();
+
+    for (const m of all) {
+      if (seenIds.has(m.id)) continue;
+      const recipStateEmail = m.userState?.recipientEmail?.toLowerCase().trim();
+      const isRecipient = recipStateEmail === cleanEmail || (m.recipients && m.recipients.some((r) => {
+        const cleanR = r.toLowerCase().trim();
+        return cleanR === cleanEmail || (cleanR.includes('@') ? cleanR === cleanEmail : `${cleanR}@mexo.com` === cleanEmail);
+      }));
+
+      // Match messages scoped to this user state, or sent/received by this user
+      if (recipStateEmail === cleanEmail || isRecipient) {
+        // If recipientEmail matches or sender matches
+        if (recipStateEmail === cleanEmail) {
+          seenIds.add(m.id);
+          userMessages.push(m);
+        } else if (m.senderEmail.toLowerCase().trim() === cleanEmail && !m.userState?.recipientEmail) {
+          seenIds.add(m.id);
+          userMessages.push(m);
+        }
+      }
+    }
+
+    return userMessages;
   }
 
   sendMessage(params: {
@@ -416,24 +456,45 @@ class MexoDatabase {
     subject: string;
     bodyHtml: string;
     attachments?: any[];
+    clientMessageId?: string;
   }): Message[] {
     const createdMessages: Message[] = [];
     const allMessages = this.getMessages();
-    const currentUser = this.getUserByEmail(params.senderEmail) || this.getCurrentUser();
+
+    // Idempotency check: if a message with clientMessageId already exists in database, return it
+    if (params.clientMessageId) {
+      const existing = allMessages.filter(
+        (m) => m.id === params.clientMessageId || (m as any).clientMessageId === params.clientMessageId
+      );
+      if (existing.length > 0) {
+        return existing;
+      }
+    }
+
+    let cleanSenderEmail = params.senderEmail.toLowerCase().trim();
+    if (!cleanSenderEmail.includes('@')) {
+      cleanSenderEmail = `${cleanSenderEmail}@mexo.com`;
+    }
+
+    const currentUser = this.getUserByEmail(cleanSenderEmail) || this.getCurrentUser();
     const groups = this.getGroups();
 
-    // Resolve recipients - expanded for MEXO Groups!
+    // Resolve recipients - expanded for MEXO Groups! Normalize to full emails
     const resolvedRecipients: string[] = [];
 
     params.recipients.forEach((recip) => {
-      const clean = recip.toLowerCase().trim();
+      let clean = recip.toLowerCase().trim();
+      if (!clean.includes('@')) {
+        clean = `${clean}@mexo.com`;
+      }
       const groupMatch = groups.find((g) => g.address.toLowerCase() === clean);
       if (groupMatch) {
         // MEXO Group Distribution Engine:
-        // Distribute to all group members without duplicating attachment physical assets!
         groupMatch.members.forEach((mem) => {
-          if (!resolvedRecipients.includes(mem.email.toLowerCase())) {
-            resolvedRecipients.push(mem.email.toLowerCase());
+          let memEmail = mem.email.toLowerCase().trim();
+          if (!memEmail.includes('@')) memEmail = `${memEmail}@mexo.com`;
+          if (!resolvedRecipients.includes(memEmail)) {
+            resolvedRecipients.push(memEmail);
           }
         });
       } else {
@@ -444,15 +505,15 @@ class MexoDatabase {
     });
 
     const threadId = `th-${Date.now()}`;
-    const messageId = `msg-${Date.now()}`;
+    const messageId = params.clientMessageId || `msg-${Date.now()}`;
     const snippet = params.bodyHtml.replace(/<[^>]*>?/gm, '').slice(0, 100) + '...';
 
-    // 1. Create message for Sender inbox record
+    // 1. Create message for Sender inbox/sent record
     const senderMessage: Message = {
       id: messageId,
       threadId,
       senderName: params.senderName,
-      senderEmail: params.senderEmail,
+      senderEmail: cleanSenderEmail,
       recipients: params.recipients,
       subject: params.subject || '(no subject)',
       snippet,
@@ -460,7 +521,7 @@ class MexoDatabase {
       attachments: params.attachments || [],
       createdAt: new Date().toISOString(),
       userState: {
-        recipientEmail: params.senderEmail,
+        recipientEmail: cleanSenderEmail,
         isRead: true,
         isStarred: false,
         isImportant: false,
@@ -470,22 +531,23 @@ class MexoDatabase {
         labels: [],
       },
     };
+    (senderMessage as any).clientMessageId = params.clientMessageId;
     allMessages.unshift(senderMessage);
     createdMessages.push(senderMessage);
 
-    // 2. Create individual recipient inbox states for each resolved user
+    // 2. Create individual recipient inbox states for each resolved user (ONLY if distinct from sender!)
     resolvedRecipients.forEach((recipEmail) => {
-      if (recipEmail !== params.senderEmail.toLowerCase()) {
+      if (recipEmail !== cleanSenderEmail) {
         const recipMsg: Message = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           threadId,
           senderName: params.senderName,
-          senderEmail: params.senderEmail,
+          senderEmail: cleanSenderEmail,
           recipients: params.recipients,
           subject: params.subject || '(no subject)',
           snippet,
           bodyHtml: params.bodyHtml,
-          attachments: params.attachments || [], // Referencing identical attachment metadata!
+          attachments: params.attachments || [],
           createdAt: new Date().toISOString(),
           userState: {
             recipientEmail: recipEmail,
@@ -498,6 +560,7 @@ class MexoDatabase {
             labels: [],
           },
         };
+        (recipMsg as any).clientMessageId = params.clientMessageId;
         allMessages.unshift(recipMsg);
         createdMessages.push(recipMsg);
       }
