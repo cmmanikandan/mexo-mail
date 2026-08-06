@@ -165,7 +165,49 @@ export const api = {
       const primaryEmail = `${cleanUsername}@mexo.com`;
       const pwd = userData.password || cleanUsername;
 
-      // 1. Create authentication user in Supabase Auth
+      // Step 0: Check if profile already exists in DB (fast path for re-imports)
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('primary_address', primaryEmail)
+        .maybeSingle();
+
+      if (existingProfile) {
+        // Profile already exists — update fields and return
+        const { data: updated } = await supabase
+          .from('profiles')
+          .update({
+            first_name: userData.firstName,
+            last_name: userData.lastName,
+            role: userData.role || existingProfile.role || 'user',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingProfile.id)
+          .select()
+          .single();
+
+        const profile = updated || existingProfile;
+        return {
+          user: {
+            id: profile.id,
+            username: profile.username,
+            email: profile.primary_address,
+            firstName: profile.first_name || '',
+            lastName: profile.last_name || '',
+            avatarUrl: profile.avatar_url || undefined,
+            role: profile.role || 'user',
+            status: 'active',
+            storageUsedBytes: Number(profile.storage_used_bytes || 0),
+            storageLimitBytes: Number(profile.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+            createdAt: profile.created_at,
+            lastActiveAt: profile.updated_at,
+            twoFactorEnabled: false,
+          },
+          error: null,
+        };
+      }
+
+      // Step 1: Create auth user via signUp
       const { data: authResult, error: authError } = await supabase.auth.signUp({
         email: primaryEmail,
         password: pwd,
@@ -178,24 +220,27 @@ export const api = {
         },
       });
 
-      let userId = authResult?.user?.id;
+      // Get the auth user ID — signUp returns the user object even for unconfirmed users
+      let userId: string | undefined = authResult?.user?.id;
 
-      if (authError || !userId) {
-        // If auth user already exists, attempt to sign in to obtain user ID
-        const { data: signInResult, error: signInErr } = await supabase.auth.signInWithPassword({
+      if (!userId) {
+        // signUp failed — likely "User already registered" in auth but no profile yet.
+        // Try signing in to retrieve the existing auth user's ID.
+        const { data: signInResult } = await supabase.auth.signInWithPassword({
           email: primaryEmail,
           password: pwd,
         });
-
-        if (signInResult?.user?.id) {
-          userId = signInResult.user.id;
-        } else {
-          // Generate deterministic or UUID fallback if needed for profile
-          userId = authResult?.user?.id || crypto.randomUUID();
-        }
+        userId = signInResult?.user?.id;
       }
 
-      // 2. Create corresponding DB profile
+      // If we still have no valid auth user ID, we cannot create the profile
+      // because profiles.id has a FK constraint to auth.users.id.
+      if (!userId) {
+        const errMsg = authError?.message || 'Could not obtain a valid Auth user ID. Account may require email confirmation.';
+        return { user: null, error: errMsg };
+      }
+
+      // Step 2: Insert profile with the verified auth user ID
       const profileData = {
         id: userId,
         username: cleanUsername,
@@ -211,7 +256,7 @@ export const api = {
 
       const { data: insertedProfile, error: profError } = await supabase
         .from('profiles')
-        .upsert(profileData)
+        .upsert(profileData, { onConflict: 'id' })
         .select()
         .single();
 
@@ -244,6 +289,7 @@ export const api = {
       return { user: null, error: err?.message || 'Failed to create user account.' };
     }
   },
+
 
   async updateUserProfile(userId: string, updates: Partial<MexoUser>): Promise<MexoUser | null> {
     try {
