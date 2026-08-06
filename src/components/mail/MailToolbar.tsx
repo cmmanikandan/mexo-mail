@@ -235,7 +235,7 @@ export const MailToolbar: React.FC<MailToolbarProps> = ({ totalCount, allVisible
       {/* Right Pagination Info */}
       <div className="flex items-center space-x-3 text-xs text-slate-500 font-medium">
         <span>
-          1–{totalCount > 50 ? 50 : totalCount} of {totalCount}
+          {totalCount === 0 ? '0 of 0' : `1–${totalCount > 50 ? 50 : totalCount} of ${totalCount}`}
         </span>
         <div className="flex items-center space-x-1">
           <button className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-40" disabled>

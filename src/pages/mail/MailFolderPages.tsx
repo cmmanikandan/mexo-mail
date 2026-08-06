@@ -13,48 +13,93 @@ import { Message, Thread } from '../../types/mail';
 
 import { realtimeService } from '../../services/realtimeService';
 
+import { AlertCircle, RefreshCw } from 'lucide-react';
+
 export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ folderOverride }) => {
   const { folder: paramFolder } = useParams<{ folder: string }>();
   const [searchParams] = useSearchParams();
   const urlQuery = searchParams.get('q') || '';
 
   const { currentFolder, activeLabelId, searchQuery, lastUpdated, triggerRefresh } = useMailStore();
-  const { currentUser } = useAuthStore();
+  const { currentUser, isLoading: isAuthLoading } = useAuthStore();
 
   const activeFolder = folderOverride || (paramFolder as MailFolder) || currentFolder || 'inbox';
   const effectiveQuery = urlQuery || searchQuery;
-  const [isLoading, setIsLoading] = React.useState(true);
+
+  const [isInitialLoading, setIsInitialLoading] = React.useState(true);
+  const [fetchError, setFetchError] = React.useState<string | null>(null);
+  const requestSeqRef = React.useRef(0);
 
   const isMobileSearchRoute = activeFolder === 'search' && typeof window !== 'undefined' && window.innerWidth < 768;
 
-  // Asynchronously fetch messages and drafts from Supabase database on mount/refresh
-  React.useEffect(() => {
-    if (currentUser?.id && currentUser.id !== 'guest-user') {
-      setIsLoading(true);
-      Promise.all([
+  // Asynchronously fetch messages and drafts with sequence protection & error handling
+  const fetchMailboxData = React.useCallback(async (isBackground = false) => {
+    if (!currentUser?.id || currentUser.id === 'guest-user') {
+      setIsInitialLoading(false);
+      return;
+    }
+
+    const currentSeq = ++requestSeqRef.current;
+    
+    // Only show full skeleton on first load if cached messages are empty
+    const cachedCount = db.getMessagesForUser(currentUser.email || '').length;
+    if (!isBackground && cachedCount === 0) {
+      setIsInitialLoading(true);
+    }
+    setFetchError(null);
+
+    try {
+      await Promise.all([
         db.fetchMessagesForUser(currentUser.id),
         db.fetchDraftsForUser(currentUser.id),
-      ]).then(() => {
+      ]);
+
+      if (currentSeq === requestSeqRef.current) {
         triggerRefresh();
-        setIsLoading(false);
-      }).catch(() => {
-        setIsLoading(false);
-      });
-
-      // Connect Realtime subscription
-      realtimeService.connect(currentUser.email, currentUser.id);
-
-      const unsubscribe = realtimeService.subscribe((evt: any) => {
-        if (evt.type === 'NEW_MESSAGE' || evt.type === 'MESSAGES_REFRESHED') {
-          db.fetchMessagesForUser(currentUser.id).then(() => triggerRefresh());
-        }
-      });
-
-      return () => {
-        unsubscribe();
-      };
+      }
+    } catch (err: any) {
+      console.error('[MAILBOX FETCH ERROR]', err);
+      if (currentSeq === requestSeqRef.current) {
+        setFetchError('Unable to load messages. Please check connection and retry.');
+      }
+    } finally {
+      if (currentSeq === requestSeqRef.current) {
+        setIsInitialLoading(false);
+      }
     }
-  }, [currentUser?.id, lastUpdated]);
+  }, [currentUser?.id, currentUser?.email, triggerRefresh]);
+
+  // Initial fetch and folder switch handler
+  React.useEffect(() => {
+    if (!isAuthLoading) {
+      fetchMailboxData(false);
+    }
+  }, [currentUser?.id, isAuthLoading, activeFolder, fetchMailboxData]);
+
+  // Realtime subscription & PWA visibility resume listener
+  React.useEffect(() => {
+    if (!currentUser?.id || currentUser.id === 'guest-user') return;
+
+    realtimeService.connect(currentUser.email, currentUser.id);
+
+    const unsubscribe = realtimeService.subscribe((evt: any) => {
+      if (evt.type === 'NEW_MESSAGE' || evt.type === 'MESSAGES_REFRESHED') {
+        fetchMailboxData(true);
+      }
+    });
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchMailboxData(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      unsubscribe();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [currentUser?.id, currentUser?.email, fetchMailboxData]);
 
   // Reactively recompute filtered messages on any state change or action (lastUpdated)
   const filteredMessages: Message[] = React.useMemo(() => {
@@ -152,11 +197,33 @@ export const MailFolderPage: React.FC<{ folderOverride?: MailFolder }> = ({ fold
     return <MobileSearchPage />;
   }
 
+  if (fetchError && filteredMessages.length === 0) {
+    return (
+      <AppLayout>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 text-center my-auto select-none">
+          <div className="w-14 h-14 rounded-2xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-3.5 shadow-sm">
+            <AlertCircle className="w-8 h-8" />
+          </div>
+          <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 mb-1">Unable to load messages</h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mb-5 font-normal">{fetchError}</p>
+          <button
+            type="button"
+            onClick={() => fetchMailboxData(false)}
+            className="px-4 py-2 bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white rounded-xl text-xs font-semibold shadow-sm hover:opacity-95 transition-all flex items-center space-x-2 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Retry loading</span>
+          </button>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <div key={activeFolder} className="flex-1 flex flex-col min-h-0 animate-in fade-in slide-in-from-right-1 duration-200">
         {(activeFolder === 'search' || Boolean(effectiveQuery.trim())) && <SearchFilterChips />}
-        <MailList messages={filteredMessages} isLoading={isLoading} />
+        <MailList messages={filteredMessages} isLoading={isInitialLoading && filteredMessages.length === 0} />
       </div>
     </AppLayout>
   );
