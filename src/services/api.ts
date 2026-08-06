@@ -577,11 +577,13 @@ export const api = {
       // 3. Resolve recipients & create inbox states for recipients
       for (const recip of params.recipients) {
         const recipEmail = await this.resolveUsernameToEmail(recip);
+        const recipUsername = recip.includes('@') ? recip.split('@')[0] : recip;
+
         if (recipEmail !== cleanSender) {
           const { data: recipProfile } = await supabase
             .from('profiles')
             .select('id')
-            .eq('primary_address', recipEmail)
+            .or(`primary_address.eq.${recipEmail},username.eq.${recipUsername}`)
             .maybeSingle();
 
           if (recipProfile?.id) {
