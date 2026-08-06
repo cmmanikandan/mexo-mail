@@ -39,7 +39,7 @@ const MobileSearchResultRow: React.FC<{ message: Message; onOpen: () => void }> 
     >
       <MexoAvatar
         name={message.senderName || 'MEXO'}
-        src={undefined}
+        src={message.senderAvatar}
         size="md"
         className="w-10 h-10 text-xs font-bold flex-shrink-0 mt-0.5"
       />
@@ -134,7 +134,7 @@ export const MobileSearchPage: React.FC = () => {
 
   // Dynamic People List: contacts + recent senders/recipients
   const peopleList = useMemo(() => {
-    const peopleMap = new Map<string, { id: string; name: string; email: string }>();
+    const peopleMap = new Map<string, { id: string; name: string; email: string; avatarUrl?: string }>();
 
     // Add saved contacts
     contacts.forEach((c) => {
@@ -142,6 +142,7 @@ export const MobileSearchPage: React.FC = () => {
         id: c.id,
         name: `${c.firstName} ${c.lastName}`,
         email: c.email,
+        avatarUrl: c.avatarUrl,
       });
     });
 
@@ -154,6 +155,7 @@ export const MobileSearchPage: React.FC = () => {
             id: `recent-${m.id}`,
             name: m.senderName || m.senderEmail.split('@')[0],
             email: m.senderEmail,
+            avatarUrl: m.senderAvatar,
           });
         }
       }
@@ -398,7 +400,7 @@ export const MobileSearchPage: React.FC = () => {
                       onClick={() => handlePersonTap(p)}
                       className="w-full flex items-center px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors"
                     >
-                      <MexoAvatar name={p.name} size="sm" className="mr-3 flex-shrink-0" />
+                      <MexoAvatar name={p.name} src={p.avatarUrl} size="sm" className="mr-3 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-app-heading truncate">{p.name}</p>
                         <p className="text-[11px] text-app-muted truncate">{p.email}</p>
@@ -471,7 +473,7 @@ export const MobileSearchPage: React.FC = () => {
                       onClick={() => handlePersonTap(person)}
                       className="w-full flex items-center px-4 py-3.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 active:bg-slate-100 transition-colors min-h-[64px]"
                     >
-                      <MexoAvatar name={person.name} size="md" className="mr-3.5 flex-shrink-0" />
+                      <MexoAvatar name={person.name} src={person.avatarUrl} size="md" className="mr-3.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-app-heading truncate">{person.name}</p>
                         <p className="text-xs text-app-muted truncate mt-0.5 font-mono">{person.email}</p>

@@ -192,7 +192,7 @@ export const ContactsPage: React.FC = () => {
                           </button>
                         </td>
                         <td className="py-3 px-4 font-bold text-app-heading flex items-center space-x-3">
-                          <MexoAvatar name={`${c.firstName} ${c.lastName}`} size="sm" />
+                          <MexoAvatar name={`${c.firstName} ${c.lastName}`} src={c.avatarUrl} size="sm" />
                           <span>
                             {c.firstName} {c.lastName}
                           </span>
@@ -258,7 +258,7 @@ export const ContactsPage: React.FC = () => {
                   {/* Card Header: Avatar + Name + Org + Star */}
                   <div className="flex items-start justify-between">
                     <div className="flex items-center space-x-3 min-w-0 flex-1 mr-2">
-                      <MexoAvatar name={`${c.firstName} ${c.lastName}`} size="md" className="flex-shrink-0" />
+                      <MexoAvatar name={`${c.firstName} ${c.lastName}`} src={c.avatarUrl} size="md" className="flex-shrink-0" />
                       <div className="min-w-0 flex-1">
                         <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
                           {c.firstName} {c.lastName}
