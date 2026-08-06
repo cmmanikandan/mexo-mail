@@ -760,9 +760,21 @@ export const api = {
 
   async updateMessageState(stateId: string, updates: any): Promise<boolean> {
     try {
+      const dbUpdates: any = {};
+      if (updates.isRead !== undefined) dbUpdates.is_read = updates.isRead;
+      if (updates.is_read !== undefined) dbUpdates.is_read = updates.is_read;
+      if (updates.isStarred !== undefined) dbUpdates.starred = updates.isStarred;
+      if (updates.starred !== undefined) dbUpdates.starred = updates.starred;
+      if (updates.isArchived !== undefined) dbUpdates.is_archived = updates.isArchived;
+      if (updates.isDeleted !== undefined) dbUpdates.is_deleted = updates.isDeleted;
+      if (updates.isSpam !== undefined) dbUpdates.is_spam = updates.isSpam;
+      if (updates.isImportant !== undefined) dbUpdates.is_important = updates.isImportant;
+      if (updates.labels !== undefined) dbUpdates.labels = updates.labels;
+      dbUpdates.updated_at = new Date().toISOString();
+
       const { error } = await supabase
         .from('message_states')
-        .update(updates)
+        .update(dbUpdates)
         .eq('id', stateId);
       return !error;
     } catch {

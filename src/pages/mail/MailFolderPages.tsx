@@ -165,6 +165,14 @@ export const ThreadDetailPage: React.FC = () => {
     return messages.filter((m) => m.threadId === id);
   }, [id, messages, lastUpdated]);
 
+  // Mark unread messages in thread as read when opened
+  React.useEffect(() => {
+    const unreadIds = threadMessages.filter((m) => !m.userState.isRead).map((m) => m.id);
+    if (unreadIds.length > 0) {
+      useMailStore.getState().markAsRead(unreadIds, true);
+    }
+  }, [id, threadMessages]);
+
   if (threadMessages.length === 0) {
     return (
       <AppLayout>
