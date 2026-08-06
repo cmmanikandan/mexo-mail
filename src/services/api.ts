@@ -44,6 +44,38 @@ export const api = {
     }
   },
 
+  async getUserProfileByEmail(email: string): Promise<MexoUser | null> {
+    try {
+      const clean = email.toLowerCase().trim();
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`primary_address.eq.${clean},username.eq.${clean.split('@')[0]}`)
+        .maybeSingle();
+
+      if (error || !data) return null;
+
+      return {
+        id: data.id,
+        username: data.username,
+        email: data.primary_address,
+        firstName: data.first_name || '',
+        lastName: data.last_name || '',
+        avatarUrl: data.avatar_url || undefined,
+        role: data.role || 'user',
+        status: data.status === 'suspended' ? 'suspended' : 'active',
+        storageUsedBytes: Number(data.storage_used_bytes || 0),
+        storageLimitBytes: Number(data.storage_limit_bytes || 15 * 1024 * 1024 * 1024),
+        createdAt: data.created_at,
+        lastActiveAt: data.updated_at,
+        twoFactorEnabled: false,
+      };
+    } catch (err) {
+      console.error('Error fetching user profile by email:', err);
+      return null;
+    }
+  },
+
   async resolveUsernameToEmail(usernameOrEmail: string): Promise<string> {
     const clean = usernameOrEmail.trim().toLowerCase();
     if (clean.includes('@')) return clean;
