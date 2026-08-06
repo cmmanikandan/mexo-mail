@@ -89,7 +89,7 @@ export const ProfilePhotoUploader: React.FC<ProfilePhotoUploaderProps> = ({
         setUploadProgress(pct);
       });
 
-      const newAvatarUrl = result.secure_url;
+      const newAvatarUrl = `${result.secure_url}?v=${Date.now()}`;
 
       if (isTargetMode) {
         // Admin updating another user's photo

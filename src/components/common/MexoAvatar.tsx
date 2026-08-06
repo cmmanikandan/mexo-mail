@@ -17,6 +17,10 @@ export const MexoAvatar: React.FC<MexoAvatarProps> = ({
 }) => {
   const [hasError, setHasError] = useState(false);
 
+  React.useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
   const getInitials = (n: string) => {
     if (!n || !n.trim()) return 'MX';
     const parts = n.trim().split(/\s+/);

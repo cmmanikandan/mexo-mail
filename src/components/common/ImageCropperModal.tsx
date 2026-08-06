@@ -10,15 +10,16 @@ export interface ImageCropperModalProps {
 }
 
 const OUTPUT_SIZE = 512;
-const MIN_ZOOM = 1;
-const MAX_ZOOM = 3;
+const MIN_ZOOM = 1.0;
+const MAX_ZOOM = 3.0;
 
-/** Draw image on canvas respecting EXIF orientation embedded in the JPEG */
-async function correctOrientation(dataUrl: string): Promise<HTMLImageElement> {
-  return new Promise((resolve) => {
+/** Load image from data URL respecting orientation */
+async function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.onload = () => resolve(img);
-    img.onerror = () => resolve(img);
+    img.onerror = (err) => reject(err);
     img.src = dataUrl;
   });
 }
@@ -32,9 +33,9 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cropAreaRef = useRef<HTMLDivElement>(null);
 
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);   // 0 | 90 | 180 | 270
-  const [offset, setOffset] = useState({ x: 0, y: 0 });  // pan offset in pixels (crop-area space)
+  const [zoom, setZoom] = useState<number>(1.0);
+  const [rotation, setRotation] = useState<number>(0);   // 0 | 90 | 180 | 270
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isSaving, setIsSaving] = useState(false);
   const [loadedImg, setLoadedImg] = useState<HTMLImageElement | null>(null);
 
@@ -42,105 +43,44 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
   const lastPointer = useRef({ x: 0, y: 0 });
   const lastPinchDist = useRef<number | null>(null);
 
-  // ─── Load image ───────────────────────────────────────────────────────────
+  // ─── Load raw image when modal opens ─────────────────────────────────────
   useEffect(() => {
     if (!isOpen || !imageSrc) return;
-    setZoom(1);
+    setZoom(1.0);
     setRotation(0);
     setOffset({ x: 0, y: 0 });
     setIsSaving(false);
-    correctOrientation(imageSrc).then(setLoadedImg);
+    loadImage(imageSrc)
+      .then(setLoadedImg)
+      .catch((err) => console.error('Failed to load image for crop:', err));
   }, [isOpen, imageSrc]);
 
-  // ─── Render canvas ────────────────────────────────────────────────────────
-  const draw = useCallback(() => {
-    const canvas = canvasRef.current;
-    const el = cropAreaRef.current;
-    if (!canvas || !el || !loadedImg) return;
-
-    const cw = el.clientWidth;
-    const ch = el.clientHeight;
-    canvas.width = cw;
-    canvas.height = ch;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    // Background
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, cw, ch);
-
-    const cx = cw / 2 + offset.x;
-    const cy = ch / 2 + offset.y;
-    const circleR = Math.min(cw, ch) * 0.42;
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate((rotation * Math.PI) / 180);
-
-    // Determine natural dimensions vs rotated
-    const isRotated90 = rotation === 90 || rotation === 270;
-    const natW = isRotated90 ? loadedImg.naturalHeight : loadedImg.naturalWidth;
-    const natH = isRotated90 ? loadedImg.naturalWidth : loadedImg.naturalHeight;
-
-    // Scale to fit the circle fully at zoom=1
-    const baseScale = (circleR * 2) / Math.min(natW, natH);
-    const scale = baseScale * zoom;
-
-    const dw = natW * scale;
-    const dh = natH * scale;
-
-    ctx.drawImage(loadedImg, -dw / 2, -dh / 2, dw, dh);
-    ctx.restore();
-
-    // Dark overlay outside circle
-    ctx.save();
-    ctx.fillStyle = 'rgba(15,23,42,0.72)';
-    ctx.fillRect(0, 0, cw, ch);
-    // Clip out the circle (punch hole)
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    ctx.arc(cw / 2, ch / 2, circleR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Circle border
-    ctx.save();
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(cw / 2, ch / 2, circleR, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-  }, [loadedImg, zoom, rotation, offset]);
-
-  useEffect(() => {
-    draw();
-  }, [draw]);
-
-  // Redraw on window resize
-  useEffect(() => {
-    const handler = () => draw();
-    window.addEventListener('resize', handler);
-    return () => window.removeEventListener('resize', handler);
-  }, [draw]);
-
-  // ─── Clamp offset to prevent empty gaps inside the circle ─────────────────
+  // ─── Clamp Offset to prevent blank space in crop circle ───────────────────
   const clampOffset = useCallback(
     (ox: number, oy: number, currentZoom: number, currentRotation: number): { x: number; y: number } => {
       const el = cropAreaRef.current;
       if (!el || !loadedImg) return { x: ox, y: oy };
+
       const cw = el.clientWidth;
       const ch = el.clientHeight;
+      if (cw === 0 || ch === 0) return { x: ox, y: oy };
+
       const circleR = Math.min(cw, ch) * 0.42;
+
       const isRotated90 = currentRotation === 90 || currentRotation === 270;
       const natW = isRotated90 ? loadedImg.naturalHeight : loadedImg.naturalWidth;
       const natH = isRotated90 ? loadedImg.naturalWidth : loadedImg.naturalHeight;
+
+      // Base scale so smallest dimension equals circle diameter (2 * circleR)
       const baseScale = (circleR * 2) / Math.min(natW, natH);
       const scale = baseScale * currentZoom;
+
       const dw = natW * scale;
       const dh = natH * scale;
+
       const maxX = Math.max(0, (dw - circleR * 2) / 2);
       const maxY = Math.max(0, (dh - circleR * 2) / 2);
+
       return {
         x: Math.min(maxX, Math.max(-maxX, ox)),
         y: Math.min(maxY, Math.max(-maxY, oy)),
@@ -149,35 +89,118 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
     [loadedImg]
   );
 
-  // ─── Pointer events (mouse + touch unified) ───────────────────────────────
+  // ─── Draw Preview Canvas ──────────────────────────────────────────────────
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const el = cropAreaRef.current;
+    if (!canvas || !el || !loadedImg) return;
+
+    const cw = el.clientWidth;
+    const ch = el.clientHeight;
+    if (cw === 0 || ch === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
+    canvas.style.width = `${cw}px`;
+    canvas.style.height = `${ch}px`;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // 1. Background
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, cw, ch);
+
+    const circleR = Math.min(cw, ch) * 0.42;
+    const cx = cw / 2 + offset.x;
+    const cy = ch / 2 + offset.y;
+
+    const isRotated90 = rotation === 90 || rotation === 270;
+    const natW = isRotated90 ? loadedImg.naturalHeight : loadedImg.naturalWidth;
+    const natH = isRotated90 ? loadedImg.naturalWidth : loadedImg.naturalHeight;
+
+    const baseScale = (circleR * 2) / Math.min(natW, natH);
+    const scale = baseScale * zoom;
+
+    const dw = natW * scale;
+    const dh = natH * scale;
+
+    // 2. Render Full-Brightness Image
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((rotation * Math.PI) / 180);
+    ctx.drawImage(loadedImg, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+
+    // 3. Dark Overlay ONLY Outside Circle (evenodd fill rule)
+    ctx.save();
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
+    ctx.beginPath();
+    ctx.rect(0, 0, cw, ch);
+    ctx.arc(cw / 2, ch / 2, circleR, 0, Math.PI * 2, true);
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    // 4. Thin Circular Guide Border (1.5px white guide)
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cw / 2, ch / 2, circleR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }, [loadedImg, zoom, rotation, offset]);
+
+  useEffect(() => {
+    draw();
+  }, [draw]);
+
+  useEffect(() => {
+    const handler = () => draw();
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, [draw]);
+
+  // ─── Pointer & Touch Events (Drag + Pinch Zoom) ──────────────────────────
   const getPointer = (e: MouseEvent | TouchEvent) => {
-    if ('touches' in e) {
+    if ('touches' in e && e.touches.length > 0) {
       return { x: e.touches[0].clientX, y: e.touches[0].clientY };
     }
-    return { x: e.clientX, y: e.clientY };
+    return { x: (e as MouseEvent).clientX, y: (e as MouseEvent).clientY };
   };
 
   const onPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
+    if (e.cancelable) e.preventDefault();
     dragging.current = true;
-    const pt = 'touches' in e.nativeEvent ? e.nativeEvent.touches[0] : e.nativeEvent as MouseEvent;
-    lastPointer.current = { x: (pt as Touch).clientX ?? (pt as MouseEvent).clientX, y: (pt as Touch).clientY ?? (pt as MouseEvent).clientY };
+    const nativeEvt = e.nativeEvent;
+    if ('touches' in nativeEvt && nativeEvt.touches.length > 0) {
+      lastPointer.current = { x: nativeEvt.touches[0].clientX, y: nativeEvt.touches[0].clientY };
+    } else if ('clientX' in nativeEvt) {
+      lastPointer.current = { x: (nativeEvt as MouseEvent).clientX, y: (nativeEvt as MouseEvent).clientY };
+    }
   };
 
   const onPointerMove = useCallback(
     (e: MouseEvent | TouchEvent) => {
       if (!dragging.current) return;
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
 
       // Pinch zoom
       if ('touches' in e && e.touches.length === 2) {
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
-        if (lastPinchDist.current !== null) {
+        if (lastPinchDist.current !== null && lastPinchDist.current > 0) {
           const delta = dist / lastPinchDist.current;
           setZoom((z) => {
             const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * delta));
+            setOffset((prev) => clampOffset(prev.x, prev.y, next, rotation));
             return next;
           });
         }
@@ -190,6 +213,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       const dx = pt.x - lastPointer.current.x;
       const dy = pt.y - lastPointer.current.y;
       lastPointer.current = pt;
+
       setOffset((prev) => clampOffset(prev.x + dx, prev.y + dy, zoom, rotation));
     },
     [clampOffset, zoom, rotation]
@@ -200,24 +224,47 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
     lastPinchDist.current = null;
   };
 
+  // Mouse wheel zoom
+  const onWheel = useCallback(
+    (e: WheelEvent) => {
+      if (e.cancelable) e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.1 : -0.1;
+      setZoom((z) => {
+        const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z + delta));
+        setOffset((prev) => clampOffset(prev.x, prev.y, next, rotation));
+        return next;
+      });
+    },
+    [clampOffset, rotation]
+  );
+
   useEffect(() => {
     if (!isOpen) return;
     window.addEventListener('mousemove', onPointerMove, { passive: false });
     window.addEventListener('mouseup', onPointerUp);
     window.addEventListener('touchmove', onPointerMove, { passive: false });
     window.addEventListener('touchend', onPointerUp);
+
+    const el = cropAreaRef.current;
+    if (el) {
+      el.addEventListener('wheel', onWheel, { passive: false });
+    }
+
     return () => {
       window.removeEventListener('mousemove', onPointerMove);
       window.removeEventListener('mouseup', onPointerUp);
       window.removeEventListener('touchmove', onPointerMove);
       window.removeEventListener('touchend', onPointerUp);
+      if (el) el.removeEventListener('wheel', onWheel);
     };
-  }, [isOpen, onPointerMove]);
+  }, [isOpen, onPointerMove, onWheel]);
 
   // ESC to close
   useEffect(() => {
     if (!isOpen) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
@@ -227,10 +274,12 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
     if (!isOpen) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [isOpen]);
 
-  // ─── Zoom change → clamp offset ──────────────────────────────────────────
+  // ─── Zoom Change ──────────────────────────────────────────────────────────
   const handleZoomChange = (newZoom: number) => {
     const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, newZoom));
     setZoom(clamped);
@@ -240,13 +289,13 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
   // ─── Rotation ─────────────────────────────────────────────────────────────
   const rotate = (dir: 1 | -1) => {
     setRotation((r) => {
-      const next = ((r + dir * 90) + 360) % 360;
-      setOffset({ x: 0, y: 0 });  // reset pan on rotation
+      const next = (r + dir * 90 + 360) % 360;
+      setOffset({ x: 0, y: 0 });
       return next;
     });
   };
 
-  // ─── Crop output ──────────────────────────────────────────────────────────
+  // ─── Generate Cropped Image Blob (Exact Preview Match) ────────────────────
   const handleSave = async () => {
     if (!loadedImg || isSaving) return;
     setIsSaving(true);
@@ -256,46 +305,54 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       const cw = el.clientWidth;
       const ch = el.clientHeight;
       const circleR = Math.min(cw, ch) * 0.42;
-      const cx = cw / 2 + offset.x;
-      const cy = ch / 2 + offset.y;
 
       const out = document.createElement('canvas');
       out.width = OUTPUT_SIZE;
       out.height = OUTPUT_SIZE;
-      const ctx = out.getContext('2d')!;
+      const ctx = out.getContext('2d');
+      if (!ctx) throw new Error('Could not get 2D canvas context');
 
-      // White background (handles transparent PNG correctly)
+      // Fill white background in case of PNG transparency
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, OUTPUT_SIZE, OUTPUT_SIZE);
 
-      // Scale from crop-area coords to output coords
+      // Scale factor from preview crop area space to output 512x512 space
       const scaleToOutput = OUTPUT_SIZE / (circleR * 2);
 
       const isRotated90 = rotation === 90 || rotation === 270;
       const natW = isRotated90 ? loadedImg.naturalHeight : loadedImg.naturalWidth;
       const natH = isRotated90 ? loadedImg.naturalWidth : loadedImg.naturalHeight;
+
       const baseScale = (circleR * 2) / Math.min(natW, natH);
       const scale = baseScale * zoom * scaleToOutput;
 
       const dw = natW * scale;
       const dh = natH * scale;
 
+      // Translate output canvas center incorporating the user's drag offset
+      const outCx = OUTPUT_SIZE / 2 + offset.x * scaleToOutput;
+      const outCy = OUTPUT_SIZE / 2 + offset.y * scaleToOutput;
+
       ctx.save();
-      ctx.translate(OUTPUT_SIZE / 2, OUTPUT_SIZE / 2);
+      ctx.translate(outCx, outCy);
       ctx.rotate((rotation * Math.PI) / 180);
       ctx.drawImage(loadedImg, -dw / 2, -dh / 2, dw, dh);
       ctx.restore();
 
       out.toBlob(
         (blob) => {
-          if (blob) onCrop(blob);
+          if (blob) {
+            onCrop(blob);
+          } else {
+            console.error('Canvas toBlob returned null');
+          }
           setIsSaving(false);
         },
         'image/webp',
         0.92
       );
     } catch (err) {
-      console.error('Crop failed:', err);
+      console.error('Crop save error:', err);
       setIsSaving(false);
     }
   };
@@ -309,7 +366,6 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       className={`fixed inset-0 z-[200] flex flex-col bg-slate-950 ${isMobile ? '' : 'items-center justify-center'}`}
       style={{ touchAction: 'none' }}
     >
-      {/* Desktop: dark backdrop click-to-close */}
       {!isMobile && (
         <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
       )}
@@ -324,31 +380,16 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 flex-shrink-0">
-          {isMobile ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white transition-colors"
-              aria-label="Cancel crop"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          ) : (
-            <div />
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 -ml-2 rounded-xl text-slate-400 hover:text-white transition-colors"
+            aria-label="Cancel crop"
+          >
+            <X className="w-5 h-5" />
+          </button>
           <h3 className="text-sm font-extrabold text-white tracking-tight">Crop profile photo</h3>
-          {!isMobile ? (
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-2 -mr-2 rounded-xl text-slate-400 hover:text-white transition-colors"
-              aria-label="Close crop editor"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          ) : (
-            <div />
-          )}
+          <div className="w-5" />
         </div>
 
         {/* Canvas crop area */}
@@ -365,10 +406,9 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
             style={{ display: 'block' }}
             aria-label="Image crop area — drag to reposition"
           />
-          {/* "This is how your photo will appear" hint */}
           <div className="absolute bottom-3 left-0 right-0 flex justify-center pointer-events-none">
-            <span className="bg-slate-950/70 text-white text-[10px] font-semibold px-3 py-1 rounded-full backdrop-blur-sm">
-              Drag to reposition · Scroll or pinch to zoom
+            <span className="bg-slate-950/80 text-white text-[11px] font-semibold px-3 py-1 rounded-full backdrop-blur-sm">
+              Drag to reposition · Pinch or scroll to zoom
             </span>
           </div>
         </div>
@@ -377,7 +417,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
         <div className="flex-shrink-0 px-5 py-4 bg-slate-950 border-t border-slate-800 space-y-4">
           {/* Zoom slider */}
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+            <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 uppercase tracking-wider">
               <span>Zoom</span>
               <span className="font-mono text-indigo-400">{zoom.toFixed(1)}×</span>
             </div>
@@ -385,7 +425,7 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
               <button
                 type="button"
                 onClick={() => handleZoomChange(zoom - 0.1)}
-                className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
+                className="p-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
                 aria-label="Zoom out"
               >
                 <ZoomOut className="w-4 h-4" />
@@ -397,13 +437,13 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
                 step={0.05}
                 value={zoom}
                 onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
-                className="flex-1 accent-indigo-500 cursor-pointer"
+                className="flex-1 accent-indigo-500 cursor-pointer h-2 bg-slate-800 rounded-lg"
                 aria-label="Zoom level"
               />
               <button
                 type="button"
                 onClick={() => handleZoomChange(zoom + 0.1)}
-                className="p-1.5 rounded-lg border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
+                className="p-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
                 aria-label="Zoom in"
               >
                 <ZoomIn className="w-4 h-4" />
@@ -411,31 +451,30 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
             </div>
           </div>
 
-          {/* Rotate + action buttons */}
-          <div className="flex items-center justify-between gap-3">
-            {/* Rotate buttons */}
+          {/* Action Footer */}
+          <div className="flex items-center justify-between gap-3 pt-1">
             <div className="flex items-center space-x-2">
               <button
                 type="button"
                 onClick={() => rotate(-1)}
-                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-semibold transition-colors"
+                className="p-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
                 aria-label="Rotate 90° counter-clockwise"
+                title="Rotate counter-clockwise"
               >
                 <RotateCcw className="w-4 h-4" />
-                <span className="hidden sm:inline">Rotate</span>
               </button>
               <button
                 type="button"
                 onClick={() => rotate(1)}
-                className="flex items-center space-x-1.5 px-3 py-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 text-xs font-semibold transition-colors"
+                className="p-2 rounded-xl border border-slate-700 text-slate-300 hover:bg-slate-800 transition-colors"
                 aria-label="Rotate 90° clockwise"
+                title="Rotate clockwise"
               >
                 <RotateCw className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Cancel + Save */}
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2.5">
               <button
                 type="button"
                 onClick={onClose}
@@ -447,8 +486,8 @@ export const ImageCropperModal: React.FC<ImageCropperModalProps> = ({
                 type="button"
                 onClick={handleSave}
                 disabled={isSaving}
-                className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white text-xs font-extrabold shadow-lg hover:opacity-90 transition-opacity disabled:opacity-60"
-                aria-label="Save profile photo"
+                className="flex items-center space-x-1.5 px-5 py-2 rounded-xl bg-gradient-to-tr from-[#7C3AED] via-[#6366F1] to-[#0878e8] text-white text-xs font-extrabold shadow-lg hover:opacity-90 transition-opacity disabled:opacity-60 cursor-pointer"
+                aria-label="Save photo"
               >
                 {isSaving ? (
                   <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
