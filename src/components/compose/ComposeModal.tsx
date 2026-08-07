@@ -124,55 +124,66 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     return () => clearTimeout(timer);
   }, [instance.to, instance.subject, instance.bodyHtml, instance.attachments]);
 
+  const [uploadStatusText, setUploadStatusText] = useState<string | null>(null);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const file = files[0];
+    const fileList = Array.from(files);
+    const totalFiles = fileList.length;
+
     setIsUploading(true);
-    setUploadProgress(5);
+    setUploadProgress(10);
 
-    try {
-      const res = await attachmentService.uploadAttachment(file, (percent) => {
-        setUploadProgress(percent);
-      });
+    const senderUserId = currentUser?.id && /^[0-9a-fA-F-]{36}$/.test(currentUser.id)
+      ? currentUser.id
+      : 'anonymous-user';
 
-      const ext = res.format || file.name.split('.').pop()?.toLowerCase() || '';
-      const newAtt: Attachment = {
-        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        filename: file.name,
-        originalFileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        sizeBytes: res.bytes || file.size,
-        fileExtension: ext,
-        downloadUrl: res.secure_url,
-        previewUrl: res.secure_url,
-        storageUrl: res.secure_url,
-        storageProvider: 'cloudinary',
-        cloudinaryPublicId: res.public_id,
-        cloudinaryResourceType: res.resource_type,
-        cloudinaryFormat: res.format,
-        uploadedAt: new Date().toISOString(),
-      };
+    const messageId = instance.draftId || (typeof crypto !== 'undefined' && crypto.randomUUID 
+      ? crypto.randomUUID() 
+      : `draft-${Date.now()}`);
 
-      updateCompose(instance.id, {
-        attachments: [...instance.attachments, newAtt],
-      });
-      addToast({ message: `Attached "${file.name}"`, type: 'success' });
-    } catch (err: any) {
-      console.error('Cloudinary upload error:', err);
-      addToast({
-        message: err.message || "Couldn't upload this attachment. Please try again.",
-        type: 'error',
-      });
-    } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
-      if (e.target) e.target.value = '';
+    let currentAttachments = [...instance.attachments];
+
+    for (let i = 0; i < totalFiles; i++) {
+      const file = fileList[i];
+      const stepIndex = i + 1;
+      setUploadStatusText(`Uploading ${stepIndex} of ${totalFiles}: ${file.name}`);
+
+      try {
+        const newAtt = await attachmentService.uploadAttachment(
+          file,
+          { senderUserId, messageId },
+          (pct) => {
+            const overallPct = Math.round(((i + (pct / 100)) / totalFiles) * 100);
+            setUploadProgress(overallPct);
+          }
+        );
+
+        currentAttachments = [...currentAttachments, newAtt];
+        updateCompose(instance.id, { attachments: currentAttachments });
+        addToast({ message: `Attached "${file.name}"`, type: 'success' });
+      } catch (err: any) {
+        console.error('Attachment upload error:', err);
+        addToast({
+          message: err.message || `Couldn't upload "${file.name}". Please try again.`,
+          type: 'error',
+        });
+      }
     }
+
+    setIsUploading(false);
+    setUploadProgress(0);
+    setUploadStatusText(null);
+    if (e.target) e.target.value = '';
   };
 
-  const removeAttachment = (attId: string) => {
+  const removeAttachment = async (attId: string) => {
+    const attToRemove = instance.attachments.find((a) => a.id === attId);
+    if (attToRemove?.storagePath) {
+      attachmentService.deleteAttachment(attToRemove.storagePath).catch(() => null);
+    }
     updateCompose(instance.id, {
       attachments: instance.attachments.filter((a) => a.id !== attId),
     });
@@ -458,11 +469,13 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         {/* Attachment Upload Progress */}
         {isUploading && (
           <div className="px-3 py-2 bg-mexo-50 dark:bg-mexo-950 border-b border-mexo-200 dark:border-mexo-800 flex items-center space-x-3 text-xs">
-            <span className="font-semibold text-mexo-700">Uploading attachment...</span>
+            <span className="font-semibold text-mexo-700 truncate max-w-[200px] sm:max-w-xs">
+              {uploadStatusText || 'Uploading attachment...'}
+            </span>
             <div className="flex-1 h-1.5 bg-mexo-200 rounded-full overflow-hidden">
               <div className="h-full bg-mexo-600 transition-all duration-150" style={{ width: `${uploadProgress}%` }} />
             </div>
-            <span className="font-bold text-mexo-700">{uploadProgress}%</span>
+            <span className="font-bold text-mexo-700 font-mono">{uploadProgress}%</span>
           </div>
         )}
 
@@ -527,7 +540,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
           {/* Attachment Upload Button */}
           <label className="p-2 text-slate-500 hover:text-mexo-600 hover:bg-slate-200 dark:hover:bg-slate-800 rounded-xl cursor-pointer transition-colors" title="Attach file">
             <Paperclip className="w-4 h-4" />
-            <input type="file" onChange={handleFileUpload} className="hidden" />
+            <input type="file" multiple onChange={handleFileUpload} className="hidden" />
           </label>
 
           {/* Templates & Canned Responses Dropdown */}

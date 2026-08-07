@@ -6,16 +6,18 @@ export interface Attachment {
   mimeType: string;
   sizeBytes: number;
   fileExtension?: string;
+  storageProvider?: 'supabase' | 'cloudinary' | string;
+  bucketName?: string;
   storagePath?: string;
   storageKey?: string;
-  downloadUrl: string;
+  downloadUrl?: string;
   previewUrl?: string;
-  storageProvider?: string;
   storageUrl?: string;
   cloudinaryPublicId?: string;
   cloudinaryResourceType?: string;
   cloudinaryFormat?: string;
   uploadedAt?: string;
+  uploadedBy?: string;
   isImage?: boolean;
 }
 

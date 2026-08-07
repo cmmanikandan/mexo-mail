@@ -5,14 +5,12 @@ import {
   getFileCategory,
   getFileExtension,
   getFileTypeLabel,
-  FileCategory,
 } from '../../utils/fileCategory';
 import {
   downloadAttachment,
   openAttachmentInNewTab,
-  getAuthorizedAttachmentUrl,
 } from '../../utils/attachmentDownloader';
-import { attachmentService } from '../../services/attachmentService';
+import { attachmentService, FetchedBlobResult } from '../../services/attachmentService';
 import {
   FileText,
   Image as ImageIcon,
@@ -47,6 +45,9 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   const [zoomLevel, setZoomLevel] = useState(1);
   const [rotation, setRotation] = useState(0);
 
+  // Dynamic access URL state for image thumbnails / direct views
+  const [accessUrl, setAccessUrl] = useState<string>('');
+
   // Text file fetching state
   const [textContent, setTextContent] = useState<string | null>(null);
   const [isLoadingText, setIsLoadingText] = useState(false);
@@ -79,9 +80,25 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   };
   const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
 
-  const fileUrl = getAuthorizedAttachmentUrl(attachment);
+  // Fetch access URL for preview thumbnail (Images)
+  useEffect(() => {
+    let isMounted = true;
+    if (category === 'image') {
+      attachmentService
+        .getAttachmentAccessUrl(attachment)
+        .then((url) => {
+          if (isMounted) setAccessUrl(url);
+        })
+        .catch(() => {
+          if (isMounted) setAccessUrl('');
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [attachment, category]);
 
-  // PDF Fetching & Blob Object URL generation (Requirement 8)
+  // PDF Fetching & Blob Object URL generation with Retry + Fresh Signed URL
   useEffect(() => {
     let isMounted = true;
     let createdUrl: string | null = null;
@@ -94,7 +111,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
 
       attachmentService
         .fetchAttachmentBlob(attachment)
-        .then(({ objectUrl }: { objectUrl: string }) => {
+        .then(({ objectUrl }: FetchedBlobResult) => {
           if (!isMounted) {
             URL.revokeObjectURL(objectUrl);
             return;
@@ -108,7 +125,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
           console.error('[PDF Preview Error]', err);
           setIsPdfLoading(false);
           setIsPdfError(true);
-          setPdfErrorMessage(err.message || 'The file could not be retrieved from storage.');
+          setPdfErrorMessage(err.message || 'Unable to open attachment.');
         });
     }
 
@@ -122,27 +139,25 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
 
   // Fetch text content when opening text/csv preview
   useEffect(() => {
-    if (isPreviewOpen && (category === 'text' || ext === 'csv') && fileUrl && fileUrl !== '#') {
+    if (isPreviewOpen && (category === 'text' || ext === 'csv')) {
       setIsLoadingText(true);
       setTextError(null);
-      fetch(fileUrl)
-        .then((res) => {
-          if (!res.ok) throw new Error(`HTTP error ${res.status}`);
-          return res.text();
-        })
+      attachmentService
+        .fetchAttachmentBlob(attachment)
+        .then(({ blob }) => blob.text())
         .then((data) => {
-          setTextContent(data.slice(0, 100000)); // Cap to 100KB for performance
+          setTextContent(data.slice(0, 100000));
           setIsLoadingText(false);
         })
-        .catch((err) => {
+        .catch((err: any) => {
           console.error('Failed to fetch text content:', err);
-          setTextError('Unable to load text preview content directly.');
+          setTextError(err.message || 'Unable to load text preview content directly.');
           setIsLoadingText(false);
         });
     }
-  }, [isPreviewOpen, category, ext, fileUrl]);
+  }, [isPreviewOpen, category, ext, attachment]);
 
-  // Render appropriate Icon for category
+  // Render category icon
   const renderCategoryIcon = (sizeClass = 'w-5 h-5') => {
     switch (category) {
       case 'image':
@@ -177,10 +192,10 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
           className="flex items-start space-x-3 min-w-0 cursor-pointer"
         >
           {/* Thumbnail for Images, Category Icon for Files */}
-          {category === 'image' && fileUrl && fileUrl !== '#' ? (
+          {category === 'image' && accessUrl ? (
             <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-700">
               <img
-                src={fileUrl}
+                src={accessUrl}
                 alt={fileName}
                 className="w-full h-full object-cover"
                 onError={(e) => {
@@ -208,7 +223,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
           </div>
         </div>
 
-        {/* Action Buttons Row: Preview, Open in New Tab, Download */}
+        {/* Action Buttons Row */}
         <div className="flex items-center space-x-1 pt-2.5 mt-2 border-t border-slate-100 dark:border-slate-800/80 justify-end">
           <button
             type="button"
@@ -245,10 +260,9 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
         </div>
       </div>
 
-      {/* ─── Full-Size Desktop & Full-Screen Mobile Viewer Overlay ───────────── */}
+      {/* ─── Full-Size Desktop & Mobile Viewer Overlay ───────────────────────── */}
       {isPreviewOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 dark:bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-0 md:p-6 animate-in fade-in duration-200">
-          {/* Main Viewer Container: Full Screen on Mobile, min(1200px, 94vw) x 90vh on Desktop */}
           <div className="w-full h-full md:w-[min(1200px,94vw)] md:h-[90vh] bg-slate-900 text-white md:rounded-3xl border-0 md:border border-slate-800 flex flex-col overflow-hidden shadow-2xl">
             
             {/* Top Toolbar Header */}
@@ -350,9 +364,9 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
               {/* IMAGE VIEWER */}
               {category === 'image' && (
                 <div className="w-full h-full flex items-center justify-center overflow-auto p-2 relative select-none">
-                  {fileUrl && fileUrl !== '#' ? (
+                  {accessUrl ? (
                     <img
-                      src={fileUrl}
+                      src={accessUrl}
                       alt={fileName}
                       style={{
                         transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
@@ -363,7 +377,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                   ) : (
                     <div className="text-center p-6 text-slate-400">
                       <AlertCircle className="w-12 h-12 text-amber-500 mx-auto mb-2" />
-                      <p className="font-bold">Image URL is unavailable.</p>
+                      <p className="font-bold">Image preview unavailable</p>
                     </div>
                   )}
                 </div>
@@ -372,16 +386,16 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
               {/* PDF VIEWER */}
               {category === 'pdf' && (
                 <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 flex flex-col relative">
-                  {/* Loading State Skeleton (Requirement 9) */}
+                  {/* Loading State */}
                   {isPdfLoading && !isPdfError && (
                     <div className="absolute inset-0 z-10 bg-slate-900 flex flex-col items-center justify-center space-y-3 p-6 text-slate-300">
                       <Loader2 className="w-10 h-10 animate-spin text-rose-500" />
-                      <p className="text-sm font-bold text-white">Loading attachment...</p>
+                      <p className="text-sm font-bold text-white">Opening attachment...</p>
                       <p className="text-xs text-slate-400 font-mono">{fileName}</p>
                     </div>
                   )}
 
-                  {/* Error State (Requirement 9) */}
+                  {/* Error State with Retry requesting a NEW fresh signed URL */}
                   {isPdfError ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-900">
                       <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
@@ -395,7 +409,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                         <button
                           type="button"
                           onClick={() => {
-                            console.log('[PDF] Retrying attachment fetch for:', fileName);
+                            console.log('[PDF] Retrying attachment access with fresh signed URL for:', fileName);
                             setPdfRetryKey((k) => k + 1);
                           }}
                           className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center shadow-sm cursor-pointer"
@@ -453,7 +467,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                       onClick={() => openAttachmentInNewTab(attachment, addToast)}
                       className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center"
                     >
-                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open in new tab
+                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
                     </button>
                     <button
                       type="button"
@@ -490,7 +504,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                       onClick={() => openAttachmentInNewTab(attachment, addToast)}
                       className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center"
                     >
-                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open in new tab
+                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
                     </button>
                     <button
                       type="button"
@@ -527,7 +541,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                       onClick={() => openAttachmentInNewTab(attachment, addToast)}
                       className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center"
                     >
-                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open in new tab
+                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
                     </button>
                     <button
                       type="button"
@@ -558,7 +572,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                           onClick={() => openAttachmentInNewTab(attachment, addToast)}
                           className="px-4 py-2 bg-slate-800 text-xs font-bold rounded-xl"
                         >
-                          Open in new tab
+                          Open externally
                         </button>
                         <button
                           type="button"
@@ -582,9 +596,9 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
               {/* VIDEO VIEWER */}
               {category === 'video' && (
                 <div className="w-full h-full flex items-center justify-center p-4">
-                  {fileUrl && fileUrl !== '#' ? (
+                  {accessUrl ? (
                     <video
-                      src={fileUrl}
+                      src={accessUrl}
                       controls
                       controlsList="nodownload"
                       className="max-w-full max-h-full rounded-2xl shadow-2xl"
@@ -605,8 +619,8 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                     <h4 className="text-lg font-extrabold text-white">{fileName}</h4>
                     <p className="text-xs text-slate-400 mt-1">Audio File • {formatFileSize(attachment.sizeBytes)}</p>
                   </div>
-                  {fileUrl && fileUrl !== '#' && (
-                    <audio src={fileUrl} controls className="w-full rounded-xl" />
+                  {accessUrl && (
+                    <audio src={accessUrl} controls className="w-full rounded-xl" />
                   )}
                 </div>
               )}
@@ -627,7 +641,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                       onClick={() => openAttachmentInNewTab(attachment, addToast)}
                       className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center"
                     >
-                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open in new tab
+                      <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
                     </button>
                     <button
                       type="button"
