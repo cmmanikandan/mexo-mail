@@ -27,13 +27,25 @@ export interface TiptapEditorProps {
 }
 
 export const TiptapEditor: React.FC<TiptapEditorProps> = ({ contentHtml, onChangeHtml }) => {
+  const [showLinkModal, setShowLinkModal] = React.useState(false);
+  const [linkUrl, setLinkUrl] = React.useState('');
+
   const editor = useEditor({
     extensions: [
       StarterKit,
       Underline,
       TextStyle,
       Color,
-      Link.configure({ openOnClick: false }),
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+        HTMLAttributes: {
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          class: 'text-[#0878e8] dark:text-sky-400 underline hover:opacity-80 transition-opacity',
+        },
+      }),
       TextAlign.configure({ types: ['heading', 'paragraph'] }),
     ],
     content: contentHtml,
@@ -44,8 +56,38 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ contentHtml, onChang
 
   if (!editor) return null;
 
+  const handleOpenLinkModal = () => {
+    const previousUrl = editor.getAttributes('link').href || '';
+    setLinkUrl(previousUrl);
+    setShowLinkModal(true);
+  };
+
+  const handleSetLink = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    let url = linkUrl.trim();
+    if (!url) {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      setShowLinkModal(false);
+      return;
+    }
+
+    if (!/^https?:\/\//i.test(url) && !/^mailto:/i.test(url) && !/^tel:/i.test(url)) {
+      url = `https://${url}`;
+    }
+
+    editor.chain().focus().extendMarkRange('link').setLink({ href: url, target: '_blank' }).run();
+    setShowLinkModal(false);
+    setLinkUrl('');
+  };
+
+  const handleUnsetLink = () => {
+    editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    setShowLinkModal(false);
+    setLinkUrl('');
+  };
+
   return (
-    <div className="flex flex-col border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 overflow-hidden focus-within:ring-2 focus-within:ring-mexo-500/20 focus-within:border-mexo-600 transition-all">
+    <div className="flex flex-col border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 overflow-hidden focus-within:ring-2 focus-within:ring-mexo-500/20 focus-within:border-mexo-600 transition-all relative">
       {/* Formatting Toolbar */}
       <div className="flex items-center flex-wrap gap-1 px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 select-none">
         <button
@@ -79,6 +121,17 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ contentHtml, onChang
           title="Underline (Ctrl+U)"
         >
           <UnderlineIcon className="w-4 h-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleOpenLinkModal}
+          className={`p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-700 ${
+            editor.isActive('link') ? 'bg-slate-200 dark:bg-slate-700 text-mexo-600 font-bold' : 'text-slate-600 dark:text-slate-400'
+          }`}
+          title="Insert Link (Ctrl+K)"
+        >
+          <LinkIcon className="w-4 h-4" />
         </button>
 
         <div className="h-4 w-px bg-slate-300 dark:bg-slate-700 mx-1" />
@@ -163,6 +216,45 @@ export const TiptapEditor: React.FC<TiptapEditorProps> = ({ contentHtml, onChang
           <RemoveFormatting className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Link Popover Dialog */}
+      {showLinkModal && (
+        <form
+          onSubmit={handleSetLink}
+          className="absolute top-11 left-3 z-20 p-2.5 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 flex items-center space-x-2 animate-in fade-in zoom-in-95 duration-150"
+        >
+          <input
+            type="url"
+            autoFocus
+            placeholder="Paste URL (e.g. https://google.com)"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            className="px-3 py-1.5 text-xs bg-slate-800 text-white rounded-lg border border-slate-700 outline-none focus:border-mexo-500 w-56 sm:w-64 font-mono"
+          />
+          <button
+            type="submit"
+            className="px-3 py-1.5 text-xs font-bold bg-mexo-600 hover:bg-mexo-700 text-white rounded-lg transition-colors"
+          >
+            Apply
+          </button>
+          {editor.isActive('link') && (
+            <button
+              type="button"
+              onClick={handleUnsetLink}
+              className="px-2.5 py-1.5 text-xs font-semibold bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg transition-colors"
+            >
+              Unlink
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowLinkModal(false)}
+            className="px-2 py-1.5 text-xs text-slate-400 hover:text-white"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
 
       {/* Tiptap Editable Area */}
       <EditorContent editor={editor} className="p-3 min-h-[160px] text-sm text-slate-900 dark:text-slate-100 font-sans" />

@@ -298,8 +298,17 @@ ${latestMsg.bodyHtml}`,
                   <div className="p-4 sm:p-6 space-y-5 border-t border-app-border">
                     {/* Body HTML */}
                     <div
-                      className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed text-app-heading break-words"
-                      dangerouslySetInnerHTML={{ __html: msg.bodyHtml }}
+                      className="prose dark:prose-invert max-w-none text-xs sm:text-sm leading-relaxed text-app-heading break-words [&_a]:text-[#0878e8] [&_a]:dark:text-sky-400 [&_a]:underline [&_a]:hover:opacity-80"
+                      dangerouslySetInnerHTML={{
+                        __html: msg.bodyHtml
+                          ? (msg.bodyHtml.includes('<a ')
+                              ? msg.bodyHtml
+                              : msg.bodyHtml.replace(
+                                  /(?<!href=["'])(?<!src=["'])(https?:\/\/[^\s<"']+)/g,
+                                  '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+                                ))
+                          : '',
+                      }}
                     />
 
                     {/* Attachments */}

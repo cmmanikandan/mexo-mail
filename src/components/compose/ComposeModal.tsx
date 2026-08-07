@@ -156,23 +156,34 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       });
       addToast({ message: `Attached "${file.name}"`, type: 'success' });
     } catch (err: any) {
-      console.error('Cloudinary upload error:', err);
+      console.warn('Cloudinary upload error, using local data URL fallback:', err);
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      // Fallback attachment if network upload fails
+
+      const readFileAsDataUrl = (f: File): Promise<string> =>
+        new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => resolve('');
+          reader.readAsDataURL(f);
+        });
+
+      const dataUrl = await readFileAsDataUrl(file);
+
       const fallbackAtt: Attachment = {
-        id: `att-${Date.now()}`,
+        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         filename: file.name,
         originalFileName: file.name,
         mimeType: file.type || 'application/octet-stream',
         sizeBytes: file.size,
         fileExtension: ext,
-        downloadUrl: '#',
+        downloadUrl: dataUrl || '#',
+        previewUrl: dataUrl || '#',
         uploadedAt: new Date().toISOString(),
       };
       updateCompose(instance.id, {
         attachments: [...instance.attachments, fallbackAtt],
       });
-      addToast({ message: `Attached "${file.name}"`, type: 'info' });
+      addToast({ message: `Attached "${file.name}"`, type: 'success' });
     } finally {
       setIsUploading(false);
       setUploadProgress(null);

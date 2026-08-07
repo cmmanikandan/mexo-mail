@@ -92,7 +92,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
     }));
   },
 
-  saveComposeDraft: (id) => {
+  saveComposeDraft: async (id) => {
     const inst = get().instances.find((i) => i.id === id);
     if (!inst) return;
 
@@ -114,7 +114,7 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
     const userEmail = currentUser?.email || 'user@mexo.com';
     const userId = currentUser?.id || 'system-user';
 
-    db.saveDraft(userId, {
+    const saved = await db.saveDraft(userId, {
       id: draftId,
       userEmail,
       to: inst.to,
@@ -126,11 +126,11 @@ export const useComposeStore = create<ComposeStore>((set, get) => ({
       lastSavedAt: new Date().toISOString(),
     });
 
-    setTimeout(() => {
-      get().updateCompose(id, {
-        isSaving: false,
-        lastSavedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      });
-    }, 200);
+    const realDraftId = saved?.id || draftId;
+    get().updateCompose(id, {
+      draftId: realDraftId,
+      isSaving: false,
+      lastSavedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
   },
 }));

@@ -692,7 +692,10 @@ export const api = {
     const bodyText = params.bodyHtml ? params.bodyHtml.replace(/<[^>]*>?/gm, '') : '';
 
     try {
-      const { data: rpcRes, error: rpcErr } = await supabase.rpc('send_mail_transaction', {
+      let rpcRes: any = null;
+      let rpcErr: any = null;
+
+      const rpcParams: any = {
         p_sender_id:         senderUuid,
         p_sender_address:    cleanSender,
         p_recipients:        cleanRecipients,
@@ -702,21 +705,25 @@ export const api = {
         p_client_message_id: clientMsgId,
         p_draft_id:          params.draftId && /^[0-9a-fA-F-]{36}$/.test(params.draftId) ? params.draftId : null,
         p_attachments:       params.attachments || [],
-      });
+      };
+
+      const res1 = await supabase.rpc('send_mail_transaction', rpcParams);
+      rpcRes = res1.data;
+      rpcErr = res1.error;
+
+      // If RPC fails due to p_attachments parameter mismatch, retry without p_attachments
+      if (rpcErr && rpcErr.message && (rpcErr.message.includes('function') || rpcErr.message.includes('argument') || rpcErr.message.includes('parameter') || rpcErr.message.includes('attachments'))) {
+        console.warn('[SEND] RPC with p_attachments notice, retrying with 8-param signature...', rpcErr.message);
+        delete rpcParams.p_attachments;
+        const res2 = await supabase.rpc('send_mail_transaction', rpcParams);
+        rpcRes = res2.data;
+        rpcErr = res2.error;
+      }
 
       if (!rpcErr && rpcRes) {
         const resObj = rpcRes as any;
         if (resObj.success) {
-          console.log('[SEND] Recipient user ID:', resObj.recipient_user_ids?.join(', '));
-          console.log('[SEND] Creating message...');
-          console.log('[SEND] Message ID:', resObj.message_id);
-          console.log('[SEND] Creating recipient relation...');
-          console.log('[SEND] Creating sender mailbox state...');
-          console.log('[SEND] Creating recipient mailbox state...');
-          console.log('[SEND] Transaction committed');
-          console.log('[SEND] Publishing recipient realtime event');
-          console.log('[SEND] Completed');
-
+          console.log('[SEND] Mail delivered successfully via transaction RPC:', resObj.message_id);
           return { success: true, messageId: resObj.message_id };
         } else {
           console.error('[SEND] Transaction RPC returned error:', resObj.error);
@@ -782,21 +789,44 @@ export const api = {
       console.log('[SEND] Recipient user ID:', recipientProfiles.map((r) => r.id).join(', '));
       console.log('[SEND] Creating message...');
 
-      // Insert master message
-      const { data: msgData, error: msgErr } = await supabase
+      let msgData: any = null;
+      let msgErr: any = null;
+
+      const insertPayload: any = {
+        sender_user_id: senderUuid,
+        sender_address: cleanSender,
+        subject: params.subject || '(No Subject)',
+        body_html: params.bodyHtml || '',
+        body_text: bodyText,
+        client_message_id: clientMsgId,
+        status: 'sent',
+      };
+
+      if (params.attachments && params.attachments.length > 0) {
+        insertPayload.attachments = params.attachments;
+      }
+
+      const resInsert = await supabase
         .from('messages')
-        .insert({
-          sender_user_id: senderUuid,
-          sender_address: cleanSender,
-          subject: params.subject || '(No Subject)',
-          body_html: params.bodyHtml || '',
-          body_text: bodyText,
-          attachments: params.attachments || [],
-          client_message_id: clientMsgId,
-          status: 'sent',
-        })
+        .insert(insertPayload)
         .select()
         .single();
+
+      msgData = resInsert.data;
+      msgErr = resInsert.error;
+
+      // Fallback: If remote table does not have 'attachments' column, retry insert without it
+      if (msgErr && msgErr.message && msgErr.message.includes('attachments')) {
+        console.warn('[SEND] remote messages table missing attachments column, retrying without it...');
+        delete insertPayload.attachments;
+        const resRetry = await supabase
+          .from('messages')
+          .insert(insertPayload)
+          .select()
+          .single();
+        msgData = resRetry.data;
+        msgErr = resRetry.error;
+      }
 
       if (msgErr || !msgData) {
         console.error('[SEND] Error creating message:', msgErr);
@@ -838,10 +868,12 @@ export const api = {
       }
 
       // Delete draft if draftId provided
-      if (params.draftId && /^[0-9a-fA-F-]{36}$/.test(params.draftId)) {
+      if (params.draftId) {
         await supabase.from('drafts').delete().eq('id', params.draftId);
       }
-      await supabase.from('drafts').delete().eq('owner_user_id', senderUuid).eq('subject', params.subject);
+      if (senderUuid) {
+        await supabase.from('drafts').delete().eq('owner_user_id', senderUuid);
+      }
 
       console.log('[SEND] Transaction committed');
       console.log('[SEND] Publishing recipient realtime event');

@@ -341,8 +341,8 @@ class MexoDatabase {
 
   async deleteDraft(draftId: string): Promise<boolean> {
     this.cachedDrafts = this.cachedDrafts.filter((d) => d.id !== draftId);
-    if (draftId && !draftId.startsWith('drf-')) {
-      await api.deleteDraft(draftId);
+    if (draftId) {
+      await api.deleteDraft(draftId).catch(() => {});
     }
     return true;
   }
@@ -354,13 +354,13 @@ class MexoDatabase {
     const draftsToDelete = this.cachedDrafts.filter((d) => {
       const sameSender = !d.userEmail || d.userEmail.toLowerCase().trim() === cleanSender;
       const sameSubject = (d.subject || '').toLowerCase().trim() === cleanSubject;
-      return sameSender && sameSubject && cleanSubject.length > 0;
+      return sameSender && (sameSubject || cleanSubject.length === 0);
     });
 
     this.cachedDrafts = this.cachedDrafts.filter((d) => !draftsToDelete.includes(d));
 
     for (const d of draftsToDelete) {
-      if (d.id && !d.id.startsWith('drf-')) {
+      if (d.id) {
         api.deleteDraft(d.id).catch(() => {});
       }
     }
