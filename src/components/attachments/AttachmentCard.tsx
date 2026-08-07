@@ -49,20 +49,10 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
 
   // Fetch access URL for preview thumbnail (Images)
   useEffect(() => {
-    let isMounted = true;
     if (category === 'image') {
-      attachmentService
-        .getAttachmentAccessUrl(attachment)
-        .then((url) => {
-          if (isMounted) setAccessUrl(url);
-        })
-        .catch(() => {
-          if (isMounted) setAccessUrl('');
-        });
+      const url = attachmentService.getAttachmentAccessUrl(attachment);
+      setAccessUrl(url);
     }
-    return () => {
-      isMounted = false;
-    };
   }, [attachment, category]);
 
   // Render icon according to category

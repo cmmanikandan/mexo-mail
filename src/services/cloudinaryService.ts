@@ -63,10 +63,11 @@ export const uploadFileToCloudinary = async (
   const apiKey = getApiKey();
 
   const isImage = file.type.startsWith('image/');
-  const initialType = isImage ? 'image' : 'auto';
+  const isVideo = file.type.startsWith('video/') || file.type.startsWith('audio/');
+  const initialType = isImage ? 'image' : isVideo ? 'video' : 'raw';
 
-  const autoEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
   const typeEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${initialType}/upload`;
+  const autoEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
 
   const buildFormData = () => {
     const fd = new FormData();
@@ -95,9 +96,8 @@ export const uploadFileToCloudinary = async (
           try {
             const data = JSON.parse(xhr.responseText);
 
-            // Requirement 6: Validate returned parameters
-            if (!data || !data.secure_url || !data.public_id || !data.resource_type) {
-              return reject(new Error("Couldn't upload this attachment. Please try again."));
+            if (!data || !data.secure_url || !data.public_id) {
+              return reject(new Error("Couldn't upload this attachment to Cloudinary."));
             }
 
             resolve({
@@ -105,33 +105,32 @@ export const uploadFileToCloudinary = async (
               public_id: data.public_id,
               bytes: data.bytes || file.size,
               format: data.format || file.name.split('.').pop() || '',
-              resource_type: data.resource_type,
+              resource_type: data.resource_type || initialType,
               original_filename: data.original_filename || file.name,
             });
           } catch {
-            reject(new Error("Couldn't upload this attachment. Please try again."));
+            reject(new Error("Couldn't upload this attachment to Cloudinary."));
           }
         } else {
           reject(new Error(`Cloudinary upload failed with status ${xhr.status}: ${xhr.responseText}`));
         }
       };
 
-      xhr.onerror = () => reject(new Error("Couldn't upload this attachment. Please try again."));
+      xhr.onerror = () => reject(new Error("Couldn't upload this attachment to Cloudinary."));
       xhr.send(buildFormData());
     });
   };
 
   try {
-    return await executeUpload(autoEndpoint);
-  } catch (err) {
-    console.warn('Cloudinary auto endpoint upload error. Trying secondary endpoint...', err);
     return await executeUpload(typeEndpoint);
+  } catch (err) {
+    console.warn('Cloudinary typed endpoint upload error. Trying auto endpoint...', err);
+    return await executeUpload(autoEndpoint);
   }
 };
 
 /**
- * Uploads a pre-cropped Blob (e.g. from canvas.toBlob) directly to Cloudinary.
- * Use this for avatar uploads — avoids sending the large raw original.
+ * Uploads a pre-cropped Blob directly to Cloudinary.
  */
 export const uploadBlobToCloudinary = async (
   blob: Blob,
@@ -141,4 +140,3 @@ export const uploadBlobToCloudinary = async (
   const file = new File([blob], filename, { type: blob.type || 'image/webp' });
   return uploadFileToCloudinary(file, onProgress);
 };
-
