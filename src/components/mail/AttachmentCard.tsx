@@ -12,6 +12,7 @@ import {
   openAttachmentInNewTab,
   getAuthorizedAttachmentUrl,
 } from '../../utils/attachmentDownloader';
+import { attachmentService } from '../../services/attachmentService';
 import {
   FileText,
   Image as ImageIcon,
@@ -54,6 +55,8 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   // PDF rendering state
   const [isPdfLoading, setIsPdfLoading] = useState(true);
   const [isPdfError, setIsPdfError] = useState(false);
+  const [pdfErrorMessage, setPdfErrorMessage] = useState<string | null>(null);
+  const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [pdfRetryKey, setPdfRetryKey] = useState(0);
 
   const category = getFileCategory(attachment);
@@ -78,31 +81,44 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
 
   const fileUrl = getAuthorizedAttachmentUrl(attachment);
 
-  // PDF Preview loader watchdog & reset
+  // PDF Fetching & Blob Object URL generation (Requirement 8)
   useEffect(() => {
+    let isMounted = true;
+    let createdUrl: string | null = null;
+
     if (isPreviewOpen && category === 'pdf') {
       setIsPdfLoading(true);
       setIsPdfError(false);
+      setPdfErrorMessage(null);
+      setPdfObjectUrl(null);
 
-      if (!fileUrl || fileUrl === '#') {
-        setIsPdfLoading(false);
-        setIsPdfError(true);
-        return;
-      }
-
-      // Timeout watchdog: if iframe doesn't fire onLoad within 8 seconds
-      const timer = setTimeout(() => {
-        setIsPdfLoading((loading) => {
-          if (loading) {
-            console.warn('[PDF Preview] Load timeout reached for:', fileName);
+      attachmentService
+        .fetchAttachmentBlob(attachment)
+        .then(({ objectUrl }: { objectUrl: string }) => {
+          if (!isMounted) {
+            URL.revokeObjectURL(objectUrl);
+            return;
           }
-          return false;
+          createdUrl = objectUrl;
+          setPdfObjectUrl(objectUrl);
+          setIsPdfLoading(false);
+        })
+        .catch((err: any) => {
+          if (!isMounted) return;
+          console.error('[PDF Preview Error]', err);
+          setIsPdfLoading(false);
+          setIsPdfError(true);
+          setPdfErrorMessage(err.message || 'The file could not be retrieved from storage.');
         });
-      }, 8000);
-
-      return () => clearTimeout(timer);
     }
-  }, [isPreviewOpen, category, fileUrl, pdfRetryKey, fileName]);
+
+    return () => {
+      isMounted = false;
+      if (createdUrl) {
+        URL.revokeObjectURL(createdUrl);
+      }
+    };
+  }, [isPreviewOpen, category, attachment, pdfRetryKey]);
 
   // Fetch text content when opening text/csv preview
   useEffect(() => {
@@ -356,33 +372,35 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
               {/* PDF VIEWER */}
               {category === 'pdf' && (
                 <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 flex flex-col relative">
-                  {/* Loading State Skeleton */}
+                  {/* Loading State Skeleton (Requirement 9) */}
                   {isPdfLoading && !isPdfError && (
                     <div className="absolute inset-0 z-10 bg-slate-900 flex flex-col items-center justify-center space-y-3 p-6 text-slate-300">
                       <Loader2 className="w-10 h-10 animate-spin text-rose-500" />
-                      <p className="text-sm font-bold text-white">Loading document...</p>
+                      <p className="text-sm font-bold text-white">Loading attachment...</p>
                       <p className="text-xs text-slate-400 font-mono">{fileName}</p>
                     </div>
                   )}
 
-                  {/* Error State (Requirement 8) */}
+                  {/* Error State (Requirement 9) */}
                   {isPdfError ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-900">
                       <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
                       <div>
-                        <h4 className="text-lg font-extrabold text-white">Unable to preview this PDF</h4>
-                        <p className="text-xs text-slate-400 mt-1">{fileName} • {formatFileSize(attachment.sizeBytes)}</p>
+                        <h4 className="text-lg font-extrabold text-white">Unable to open attachment</h4>
+                        <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                          {pdfErrorMessage || 'The file could not be retrieved from storage.'}
+                        </p>
                       </div>
                       <div className="flex items-center justify-center space-x-2.5 pt-2 flex-wrap gap-y-2">
                         <button
                           type="button"
                           onClick={() => {
-                            console.log('[PDF] Retrying PDF preview for:', fileName);
+                            console.log('[PDF] Retrying attachment fetch for:', fileName);
                             setPdfRetryKey((k) => k + 1);
                           }}
                           className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center shadow-sm cursor-pointer"
                         >
-                          <RefreshCw className="w-4 h-4 mr-1.5" /> Try again
+                          <RefreshCw className="w-4 h-4 mr-1.5" /> Retry
                         </button>
                         <button
                           type="button"
@@ -400,17 +418,11 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
                         </button>
                       </div>
                     </div>
-                  ) : fileUrl && fileUrl !== '#' ? (
+                  ) : pdfObjectUrl ? (
                     <iframe
                       key={`pdf-frame-${pdfRetryKey}`}
-                      src={fileUrl}
+                      src={pdfObjectUrl}
                       title={fileName}
-                      onLoad={() => setIsPdfLoading(false)}
-                      onError={(err) => {
-                        console.error('[PDF] Frame load error:', err);
-                        setIsPdfLoading(false);
-                        setIsPdfError(true);
-                      }}
                       className="w-full h-full border-none rounded-2xl bg-white"
                     />
                   ) : null}

@@ -9,7 +9,7 @@ import { RecipientInput } from './RecipientInput';
 import { TiptapEditor } from './TiptapEditor';
 import { ScheduleSendModal } from './ScheduleSendModal';
 import { TemplatesDropdown } from './TemplatesDropdown';
-import { uploadFileToCloudinary } from '../../services/cloudinaryService';
+import { attachmentService } from '../../services/attachmentService';
 import { Attachment } from '../../types/mail';
 import {
   Minus,
@@ -133,7 +133,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     setUploadProgress(5);
 
     try {
-      const res = await uploadFileToCloudinary(file, (percent) => {
+      const res = await attachmentService.uploadAttachment(file, (percent) => {
         setUploadProgress(percent);
       });
 
