@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Attachment } from '../../types/mail';
-import { attachmentService, FetchedBlobResult } from '../../services/attachmentService';
+import { attachmentService, AttachmentError } from '../../services/attachmentService';
 import { getCleanFileName } from '../../config/attachmentConfig';
 import {
   Loader2,
@@ -8,11 +8,11 @@ import {
   RefreshCw,
   Download,
   ExternalLink,
-  ChevronLeft,
-  ChevronRight,
   ZoomIn,
   ZoomOut,
   RotateCw,
+  WifiOff,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface PdfPreviewProps {
@@ -28,6 +28,7 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorType, setErrorType] = useState<string | null>(null);
   const [pdfObjectUrl, setPdfObjectUrl] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
@@ -42,11 +43,12 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
 
     setIsLoading(true);
     setError(null);
+    setErrorType(null);
     setPdfObjectUrl(null);
 
     attachmentService
       .fetchAttachmentBlob(attachment)
-      .then(({ objectUrl }: FetchedBlobResult) => {
+      .then(({ objectUrl }) => {
         if (!isMounted) {
           URL.revokeObjectURL(objectUrl);
           return;
@@ -59,20 +61,76 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
         if (!isMounted) return;
         console.error('[PdfPreview Error]', err);
         setIsLoading(false);
-        setError(err.message || 'Unable to open attachment.');
+        setError(err.message || 'Unable to open this PDF.');
+        if (err instanceof AttachmentError) {
+          setErrorType(err.type);
+        }
       });
 
     return () => {
       isMounted = false;
-      if (createdUrl) {
-        URL.revokeObjectURL(createdUrl);
-      }
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [attachment, retryKey]);
 
   const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 0.25, 2.5));
   const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 0.25, 0.6));
   const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
+  const handleRetry = () => setRetryKey((k) => k + 1);
+
+  const renderError = () => {
+    const isOffline = errorType === 'network';
+    const isRetryable = errorType === 'auth_expired' || errorType === 'network' || errorType === 'unknown';
+    const isGone = errorType === 'not_found';
+
+    const ErrorIcon = isOffline ? WifiOff : isGone ? AlertTriangle : AlertCircle;
+    const iconColor = isOffline
+      ? 'text-sky-400'
+      : isGone
+        ? 'text-amber-400'
+        : 'text-rose-500';
+
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-900 w-full h-full">
+        <ErrorIcon className={`w-14 h-14 ${iconColor} mx-auto`} />
+        <div>
+          <h4 className="text-lg font-extrabold text-white">
+            {isOffline ? "You're offline" : isGone ? 'Attachment unavailable' : 'Unable to open PDF'}
+          </h4>
+          <p className="text-xs text-slate-400 mt-1.5 max-w-md mx-auto leading-relaxed">
+            {error}
+          </p>
+        </div>
+        <div className="flex items-center justify-center flex-wrap gap-2.5 pt-1">
+          {isRetryable && (
+            <button
+              type="button"
+              onClick={handleRetry}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center cursor-pointer shadow-sm transition-all active:scale-95"
+            >
+              <RefreshCw className="w-4 h-4 mr-1.5" /> Retry
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onDownload}
+            className="px-4 py-2.5 bg-[#0878e8] hover:bg-[#0668cc] text-white text-xs font-bold rounded-xl flex items-center cursor-pointer shadow-md transition-all active:scale-95"
+          >
+            <Download className="w-4 h-4 mr-1.5" /> Download
+          </button>
+          {!isGone && (
+            <button
+              type="button"
+              onClick={onOpenExternally}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center cursor-pointer transition-all active:scale-95"
+            >
+              <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-950 flex flex-col relative">
@@ -82,7 +140,8 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
           <button
             type="button"
             onClick={handleZoomIn}
-            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800"
+            disabled={!pdfObjectUrl}
+            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40"
             title="Zoom In"
           >
             <ZoomIn className="w-4 h-4" />
@@ -93,7 +152,8 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
           <button
             type="button"
             onClick={handleZoomOut}
-            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800"
+            disabled={!pdfObjectUrl}
+            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40"
             title="Zoom Out"
           >
             <ZoomOut className="w-4 h-4" />
@@ -102,7 +162,8 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
           <button
             type="button"
             onClick={handleRotate}
-            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800"
+            disabled={!pdfObjectUrl}
+            className="p-1 rounded text-slate-300 hover:text-white hover:bg-slate-800 disabled:opacity-40"
             title="Rotate"
           >
             <RotateCw className="w-4 h-4" />
@@ -112,55 +173,39 @@ export const PdfPreview: React.FC<PdfPreviewProps> = ({
         <div className="text-[11px] font-mono text-slate-400 truncate max-w-[200px]" title={fileName}>
           {fileName}
         </div>
+
+        {!isLoading && !error && (
+          <button
+            type="button"
+            onClick={handleRetry}
+            className="p-1 rounded text-slate-500 hover:text-slate-200 hover:bg-slate-800 transition-colors"
+            title="Reload PDF"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {(isLoading || error) && <div className="w-6" />}
       </div>
 
       {/* Main View Area */}
       <div className="flex-1 relative bg-slate-900 flex items-center justify-center overflow-hidden">
         {isLoading && (
-          <div className="absolute inset-0 z-10 bg-slate-900/90 flex flex-col items-center justify-center space-y-3 p-6 text-slate-300">
+          <div className="absolute inset-0 z-10 bg-slate-900/95 flex flex-col items-center justify-center space-y-3 p-6">
             <Loader2 className="w-10 h-10 animate-spin text-rose-500" />
-            <p className="text-sm font-bold text-white">Opening attachment...</p>
-            <p className="text-xs text-slate-400 font-mono">{fileName}</p>
+            <p className="text-sm font-bold text-white">Opening {fileName}…</p>
+            <p className="text-xs text-slate-500 font-mono">Generating secure access…</p>
           </div>
         )}
 
         {error ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-900">
-            <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
-            <div>
-              <h4 className="text-lg font-extrabold text-white">Unable to open attachment</h4>
-              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">{error}</p>
-            </div>
-            <div className="flex items-center justify-center space-x-2.5 pt-2 flex-wrap gap-y-2">
-              <button
-                type="button"
-                onClick={() => setRetryKey((k) => k + 1)}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center cursor-pointer shadow-sm"
-              >
-                <RefreshCw className="w-4 h-4 mr-1.5" /> Retry
-              </button>
-              <button
-                type="button"
-                onClick={onDownload}
-                className="px-4 py-2.5 bg-[#0878e8] hover:bg-[#0668cc] text-white text-xs font-bold rounded-xl flex items-center cursor-pointer shadow-md"
-              >
-                <Download className="w-4 h-4 mr-1.5" /> Download
-              </button>
-              <button
-                type="button"
-                onClick={onOpenExternally}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center cursor-pointer"
-              >
-                <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
-              </button>
-            </div>
-          </div>
+          renderError()
         ) : pdfObjectUrl ? (
           <div
             className="w-full h-full flex items-center justify-center overflow-auto p-1"
             style={{
               transform: `scale(${zoomLevel}) rotate(${rotation}deg)`,
               transition: 'transform 0.2s ease-in-out',
+              transformOrigin: 'center center',
             }}
           >
             <iframe

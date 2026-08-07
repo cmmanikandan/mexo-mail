@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Attachment } from '../../types/mail';
 import { useUIStore } from '../../store/uiStore';
-import { getCleanFileName } from '../../config/attachmentConfig';
+import { getCleanFileName, formatFileSize } from '../../config/attachmentConfig';
 import {
   getFileCategory,
   getFileTypeLabel,
@@ -39,13 +39,6 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   const category = getFileCategory(attachment);
   const typeLabel = getFileTypeLabel(attachment);
   const fileName = getCleanFileName(attachment);
-
-  const formatFileSize = (bytes: number) => {
-    if (!bytes) return '0 KB';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
 
   // Fetch access URL for preview thumbnail (Images)
   useEffect(() => {

@@ -12,6 +12,81 @@ export const ATTACHMENT_CONFIG = {
   BLOCKED_EXTENSIONS: ['.exe', '.bat', '.cmd', '.sh', '.vbs', '.msi', '.scr', '.ps1', '.com', '.jar'],
 };
 
+/**
+ * MIME types that should be stored on Cloudinary (public CDN images).
+ * Everything else goes to Supabase Storage (private, signed URL access).
+ */
+export const IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+  'image/heif',
+  'image/svg+xml',
+  'image/bmp',
+  'image/tiff',
+]);
+
+export const IMAGE_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'svg', 'bmp', 'tiff',
+]);
+
+/**
+ * Returns true if this file should be stored on Cloudinary (images only).
+ * Uses both MIME type (primary) and extension (fallback) for reliability.
+ */
+export function isImageFile(file: File): boolean {
+  if (file.type && file.type.trim() && IMAGE_MIME_TYPES.has(file.type.toLowerCase())) {
+    return true;
+  }
+  const ext = file.name.split('.').pop()?.toLowerCase() || '';
+  return IMAGE_EXTENSIONS.has(ext);
+}
+
+/**
+ * Returns the storage provider for an existing attachment record.
+ * Images (cloudinary) → serve directly from Cloudinary URL.
+ * Documents (supabase) → generate fresh signed URL.
+ */
+export function getAttachmentStorageProvider(attachment: Partial<Attachment>): 'cloudinary' | 'supabase' {
+  // Explicit provider field
+  const provider = (attachment.storageProvider || (attachment as any).storage_provider || '').toLowerCase();
+  if (provider === 'cloudinary') return 'cloudinary';
+  if (provider === 'supabase') return 'supabase';
+
+  // Infer from data: if storagePath exists → supabase
+  if (attachment.storagePath || (attachment as any).storage_path) return 'supabase';
+
+  // Infer from data: if cloudinaryPublicId or cloudinaryUrl exists → cloudinary
+  const hasCloudinary = !!(
+    attachment.cloudinaryPublicId ||
+    (attachment as any).cloudinary_public_id ||
+    attachment.downloadUrl?.includes('cloudinary.com') ||
+    attachment.previewUrl?.includes('cloudinary.com') ||
+    attachment.storageUrl?.includes('cloudinary.com')
+  );
+  if (hasCloudinary) return 'cloudinary';
+
+  // Default to supabase for new documents
+  return 'supabase';
+}
+
+/**
+ * Returns true if this attachment is an image (should use Cloudinary URL directly).
+ */
+export function isImageAttachment(attachment: Partial<Attachment>): boolean {
+  const mime = (attachment.mimeType || '').toLowerCase();
+  if (mime && IMAGE_MIME_TYPES.has(mime)) return true;
+  const ext = (attachment.fileExtension || '').toLowerCase();
+  if (ext && IMAGE_EXTENSIONS.has(ext)) return true;
+  // If stored on cloudinary and no storagePath → treat as image
+  const provider = getAttachmentStorageProvider(attachment);
+  if (provider === 'cloudinary' && !attachment.storagePath) return true;
+  return false;
+}
+
 export const MIME_TYPE_MAP: Record<string, string> = {
   pdf: 'application/pdf',
   png: 'image/png',
@@ -19,6 +94,8 @@ export const MIME_TYPE_MAP: Record<string, string> = {
   jpeg: 'image/jpeg',
   webp: 'image/webp',
   gif: 'image/gif',
+  heic: 'image/heic',
+  heif: 'image/heif',
   svg: 'image/svg+xml',
   doc: 'application/msword',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -29,6 +106,7 @@ export const MIME_TYPE_MAP: Record<string, string> = {
   csv: 'text/csv',
   txt: 'text/plain',
   json: 'application/json',
+  xml: 'application/xml',
   md: 'text/markdown',
   log: 'text/plain',
   zip: 'application/zip',
@@ -55,6 +133,10 @@ export function validateAttachmentFile(
     return { valid: false, error: 'No file selected.' };
   }
 
+  if (file.size === 0) {
+    return { valid: false, error: `File "${file.name}" is empty (0 bytes).` };
+  }
+
   if (currentCount >= ATTACHMENT_CONFIG.MAX_ATTACHMENTS_PER_MESSAGE) {
     return {
       valid: false,
@@ -66,7 +148,7 @@ export function validateAttachmentFile(
     const sizeMb = (ATTACHMENT_CONFIG.MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0);
     return {
       valid: false,
-      error: `File "${file.name}" exceeds maximum allowed attachment size of ${sizeMb} MB.`,
+      error: `File "${file.name}" exceeds maximum allowed size of ${sizeMb} MB.`,
     };
   }
 
@@ -74,7 +156,7 @@ export function validateAttachmentFile(
   if (ATTACHMENT_CONFIG.BLOCKED_EXTENSIONS.includes(ext)) {
     return {
       valid: false,
-      error: `File type "${ext}" is restricted for security reasons.`,
+      error: `File type "${ext}" is not allowed for security reasons.`,
     };
   }
 
@@ -109,7 +191,7 @@ export function getCleanFileName(attachment: Partial<Attachment>): string {
     (attachment as any).file_name ||
     'Attachment';
 
-  // If candidate is a pure UUID string (36 chars like 78db70dd-0ea2-45da-9368-2b246764f8c7)
+  // If candidate is a pure UUID string (36 chars)
   const isPureUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(candidate.trim());
   if (isPureUuid) {
     const ext = attachment.fileExtension ? `.${attachment.fileExtension}` : '';
@@ -123,4 +205,12 @@ export function getCleanFileName(attachment: Partial<Attachment>): string {
   }
 
   return candidate;
+}
+
+export function formatFileSize(bytes: number): string {
+  if (!bytes || bytes === 0) return '0 KB';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
