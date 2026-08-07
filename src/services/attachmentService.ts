@@ -1,10 +1,12 @@
 import { Attachment } from '../types/mail';
 import { supabase } from './supabaseClient';
+import { useAuthStore } from '../store/authStore';
 import {
   ATTACHMENT_CONFIG,
   validateAttachmentFile,
   getResolvedMimeType,
   sanitizeFilename,
+  getCleanFileName,
 } from '../config/attachmentConfig';
 
 export interface FetchedBlobResult {
@@ -20,8 +22,8 @@ export interface UploadAttachmentOptions {
 
 class AttachmentService {
   /**
-   * Uploads a file attachment to private Supabase Storage bucket `mexo-mail-attachments`.
-   * Structure: {sender_user_id}/{message_id}/{uuid}-{safe_filename}
+   * Uploads a document attachment to private Supabase Storage bucket `mail-attachments`.
+   * Storage path structure: {sender_user_id}/{message_id}/{attachment_uuid}-{safe_filename}
    */
   async uploadAttachment(
     file: File,
@@ -44,21 +46,33 @@ class AttachmentService {
     const storagePath = `${safeSenderId}/${safeMsgId}/${randomUuid}-${safeName}`;
     const contentType = getResolvedMimeType(file);
 
-    if (onProgress) onProgress(20);
+    if (onProgress) onProgress(15);
 
-    // Ensure bucket exist check silently if needed
-    const { data: uploadData, error: uploadError } = await supabase.storage
-      .from(ATTACHMENT_CONFIG.BUCKET_NAME)
+    const bucketName = ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucketName)
       .upload(storagePath, file, {
         contentType,
         upsert: false,
       });
 
-    if (onProgress) onProgress(80);
+    if (onProgress) onProgress(85);
 
     if (uploadError) {
-      console.error('[AttachmentService Upload Error]', uploadError);
-      throw new Error(uploadError.message || `Failed to upload "${file.name}" to storage.`);
+      console.warn('[AttachmentService Primary Upload Failed, trying fallback bucket]', uploadError);
+      // Fallback to secondary bucket if primary is restricted
+      const { error: fallbackError } = await supabase.storage
+        .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+        .upload(storagePath, file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (fallbackError) {
+        console.error('[AttachmentService Fallback Upload Error]', fallbackError);
+        throw new Error(fallbackError.message || uploadError.message || `Failed to upload "${file.name}" to storage.`);
+      }
     }
 
     if (onProgress) onProgress(100);
@@ -66,7 +80,7 @@ class AttachmentService {
     const ext = file.name.split('.').pop()?.toLowerCase() || '';
 
     const newAttachment: Attachment = {
-      id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: randomUuid,
       messageId: safeMsgId,
       filename: file.name,
       originalFileName: file.name,
@@ -74,7 +88,8 @@ class AttachmentService {
       sizeBytes: file.size,
       fileExtension: ext,
       storageProvider: 'supabase',
-      bucketName: ATTACHMENT_CONFIG.BUCKET_NAME,
+      bucketName,
+      storageBucket: bucketName,
       storagePath,
       uploadedAt: new Date().toISOString(),
       uploadedBy: safeSenderId,
@@ -85,7 +100,7 @@ class AttachmentService {
   }
 
   /**
-   * Generates a temporary authorized signed URL for a private attachment.
+   * Generates a fresh temporary authorized signed URL for a private attachment.
    */
   async getAttachmentAccessUrl(
     attachment: Partial<Attachment>,
@@ -95,29 +110,66 @@ class AttachmentService {
       throw new Error('Attachment metadata is missing.');
     }
 
-    // 1. Session verification
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    // 1. Session verification & automatic session refresh if required
+    let activeSession = null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      activeSession = data?.session;
 
-    if (!session) {
-      throw new Error('Your session has expired. Sign in again to access this attachment.');
+      if (!activeSession) {
+        // Attempt one-time token refresh
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        activeSession = refreshData?.session;
+      }
+    } catch (e) {
+      console.warn('[AttachmentService Auth Session Check Error]', e);
     }
 
-    // 2. Handle Supabase Storage path
-    if (attachment.storagePath || (attachment.storageProvider === 'supabase' && attachment.storagePath)) {
-      const path = attachment.storagePath;
+    // Only throw session expired error if user is completely logged out of MEXO Mail
+    const isMexoAuthenticated = useAuthStore.getState().isAuthenticated;
+    if (!activeSession && !isMexoAuthenticated) {
+      throw new Error('Your MEXO session has expired. Sign in again.');
+    }
 
+    // 2. Resolve storage path & bucket name
+    const path = attachment.storagePath || (attachment as any).storage_path;
+    const bucket =
+      attachment.storageBucket ||
+      attachment.bucketName ||
+      (attachment as any).storage_bucket ||
+      ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+
+    if (path) {
+      // Attempt signed URL creation on resolved bucket
       const { data, error } = await supabase.storage
-        .from(ATTACHMENT_CONFIG.BUCKET_NAME)
+        .from(bucket)
         .createSignedUrl(path, expiresInSeconds);
 
-      if (error || !data?.signedUrl) {
-        console.error('[AttachmentService SignedUrl Error]', error);
-        throw new Error(error?.message || 'Could not generate access URL for attachment.');
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
       }
 
-      return data.signedUrl;
+      // Try fallback bucket if specified bucket failed
+      if (error && bucket !== ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME) {
+        const { data: fallbackData, error: fallbackErr } = await supabase.storage
+          .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+          .createSignedUrl(path, expiresInSeconds);
+
+        if (!fallbackErr && fallbackData?.signedUrl) {
+          return fallbackData.signedUrl;
+        }
+      }
+
+      // If RLS permissions blocked access
+      if (error?.message?.includes('403') || error?.message?.includes('Permission')) {
+        throw new Error("You don't have permission to access this attachment.");
+      }
+
+      if (error?.message?.includes('404') || error?.message?.includes('Object not found')) {
+        throw new Error('This attachment is no longer available.');
+      }
+
+      console.warn('[AttachmentService SignedUrl Warning]', error);
     }
 
     // 3. Fallback for Legacy Cloudinary attachments
@@ -131,47 +183,64 @@ class AttachmentService {
       return encodeURI(legacyCandidate.trim());
     }
 
-    throw new Error('Attachment storage reference is unavailable.');
+    throw new Error('This attachment is no longer available.');
   }
 
   /**
    * Fetches binary bytes of an attachment using authenticated storage / fresh signed URL.
+   * Uses `cache: 'no-store'` to prevent Service Worker SW caching of temporary signed URLs.
    */
   async fetchAttachmentBlob(attachment: Partial<Attachment>): Promise<FetchedBlobResult> {
-    const fileName = attachment.originalFileName || attachment.filename || 'attachment';
+    const bucket =
+      attachment.storageBucket ||
+      attachment.bucketName ||
+      ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+    const path = attachment.storagePath || (attachment as any).storage_path;
 
-    // 1. Direct Supabase Storage download if storagePath is available
-    if (attachment.storagePath) {
+    // 1. Direct Supabase Storage download if path exists
+    if (path) {
       const { data: blob, error } = await supabase.storage
-        .from(ATTACHMENT_CONFIG.BUCKET_NAME)
-        .download(attachment.storagePath);
+        .from(bucket)
+        .download(path);
 
       if (!error && blob && blob.size > 0) {
         const objectUrl = URL.createObjectURL(blob);
         return { blob, objectUrl, contentType: blob.type || attachment.mimeType };
       }
+
+      // Try fallback bucket if primary failed
+      if (bucket !== ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME) {
+        const { data: fallbackBlob, error: fallbackErr } = await supabase.storage
+          .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+          .download(path);
+
+        if (!fallbackErr && fallbackBlob && fallbackBlob.size > 0) {
+          const objectUrl = URL.createObjectURL(fallbackBlob);
+          return { blob: fallbackBlob, objectUrl, contentType: fallbackBlob.type || attachment.mimeType };
+        }
+      }
     }
 
-    // 2. Fallback via temporary signed URL
+    // 2. Fetch binary stream via fresh signed URL with no-store cache control
     const signedUrl = await this.getAttachmentAccessUrl(attachment);
-    const response = await fetch(signedUrl, { mode: 'cors' });
+    const response = await fetch(signedUrl, { mode: 'cors', cache: 'no-store' });
 
     if (response.status === 401) {
-      throw new Error('Your session could not authorize this attachment.');
+      throw new Error('Your MEXO session could not authorize this attachment.');
     }
     if (response.status === 403) {
       throw new Error("You don't have permission to access this attachment.");
     }
     if (response.status === 404) {
-      throw new Error('This attachment could not be found.');
+      throw new Error('This attachment is no longer available.');
     }
     if (!response.ok) {
-      throw new Error(`Attachment request failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Unable to load attachment. Check your connection and try again.`);
     }
 
     const blob = await response.blob();
     if (!blob || blob.size === 0) {
-      throw new Error('Attachment content is empty (0 bytes).');
+      throw new Error('Attachment file is empty (0 bytes).');
     }
 
     const objectUrl = URL.createObjectURL(blob);
@@ -185,31 +254,30 @@ class AttachmentService {
     attachment: Partial<Attachment>,
     addToast?: (toast: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => void
   ): Promise<void> {
-    const fileName = attachment.originalFileName || attachment.filename || 'attachment';
+    const cleanName = getCleanFileName(attachment);
 
     try {
       const { objectUrl } = await this.fetchAttachmentBlob(attachment);
 
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = fileName;
+      link.download = cleanName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
 
       setTimeout(() => {
         URL.revokeObjectURL(objectUrl);
-      }, 2500);
+      }, 3000);
 
       if (addToast) {
-        addToast({ message: `Downloaded "${fileName}"`, type: 'success' });
+        addToast({ message: `Downloaded "${cleanName}"`, type: 'success' });
       }
     } catch (err: any) {
       console.error('[AttachmentService] Download failed:', err);
-
       if (addToast) {
         addToast({
-          message: err.message || `Unable to download "${fileName}". Please try again.`,
+          message: err.message || `Unable to download "${cleanName}". Please try again.`,
           type: 'error',
         });
       }
@@ -217,13 +285,13 @@ class AttachmentService {
   }
 
   /**
-   * Opens attachment URL in a new tab via fresh signed URL.
+   * Opens attachment URL in a new tab via fresh 5-minute signed URL.
    */
   async openAttachmentExternally(
     attachment: Partial<Attachment>,
     addToast?: (toast: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => void
   ): Promise<void> {
-    const fileName = attachment.originalFileName || attachment.filename || 'attachment';
+    const cleanName = getCleanFileName(attachment);
 
     try {
       const freshSignedUrl = await this.getAttachmentAccessUrl(attachment);
@@ -242,7 +310,7 @@ class AttachmentService {
       console.error('[AttachmentService] Open externally failed:', err);
       if (addToast) {
         addToast({
-          message: err.message || `Unable to open "${fileName}" in new tab.`,
+          message: err.message || `Unable to open "${cleanName}" in new tab.`,
           type: 'error',
         });
       }
@@ -250,18 +318,20 @@ class AttachmentService {
   }
 
   /**
-   * Deletes attachment file object from Supabase Storage bucket.
+   * Deletes attachment file object from Supabase Storage.
    */
-  async deleteAttachment(storagePath: string): Promise<boolean> {
+  async deleteAttachment(storagePath: string, bucketName?: string): Promise<boolean> {
     if (!storagePath) return false;
+    const bucket = bucketName || ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+
     try {
       const { error } = await supabase.storage
-        .from(ATTACHMENT_CONFIG.BUCKET_NAME)
+        .from(bucket)
         .remove([storagePath]);
 
       if (error) {
-        console.warn('Failed to delete storage object:', error);
-        return false;
+        // Try fallback bucket
+        await supabase.storage.from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME).remove([storagePath]);
       }
       return true;
     } catch (err) {

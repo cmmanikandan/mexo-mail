@@ -8,6 +8,7 @@ export interface Attachment {
   fileExtension?: string;
   storageProvider?: 'supabase' | 'cloudinary' | string;
   bucketName?: string;
+  storageBucket?: string;
   storagePath?: string;
   storageKey?: string;
   downloadUrl?: string;

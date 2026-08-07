@@ -1,12 +1,14 @@
+import { Attachment } from '../types/mail';
+
 /**
  * Configurable Attachment System Restrictions & MIME Type Definitions
  */
-
 export const ATTACHMENT_CONFIG = {
-  BUCKET_NAME: 'mexo-mail-attachments',
+  PRIMARY_BUCKET_NAME: 'mail-attachments',
+  FALLBACK_BUCKET_NAME: 'mexo-mail-attachments',
   MAX_ATTACHMENT_SIZE_BYTES: 50 * 1024 * 1024, // 50 MB
   MAX_ATTACHMENTS_PER_MESSAGE: 10,
-  SIGNED_URL_EXPIRES_IN_SECONDS: 3600, // 1 hour
+  SIGNED_URL_EXPIRES_IN_SECONDS: 300, // 5 minutes temporary signed URL
   BLOCKED_EXTENSIONS: ['.exe', '.bat', '.cmd', '.sh', '.vbs', '.msi', '.scr', '.ps1', '.com', '.jar'],
 };
 
@@ -26,11 +28,18 @@ export const MIME_TYPE_MAP: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
   csv: 'text/csv',
   txt: 'text/plain',
+  json: 'application/json',
+  md: 'text/markdown',
+  log: 'text/plain',
   zip: 'application/zip',
   rar: 'application/vnd.rar',
   '7z': 'application/x-7z-compressed',
   mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  m4a: 'audio/mp4',
   mp4: 'video/mp4',
+  webm: 'video/webm',
 };
 
 export interface FileValidationResult {
@@ -57,7 +66,7 @@ export function validateAttachmentFile(
     const sizeMb = (ATTACHMENT_CONFIG.MAX_ATTACHMENT_SIZE_BYTES / (1024 * 1024)).toFixed(0);
     return {
       valid: false,
-      error: `File "${file.name}" exceeds the maximum allowed attachment size of ${sizeMb} MB.`,
+      error: `File "${file.name}" exceeds maximum allowed attachment size of ${sizeMb} MB.`,
     };
   }
 
@@ -82,7 +91,36 @@ export function getResolvedMimeType(file: File): string {
 
 export function sanitizeFilename(filename: string): string {
   if (!filename) return 'unnamed_file';
-  // Strip dangerous path traversal or unusual characters
   const clean = filename.replace(/[/\s\\?%*:|"<>]+/g, '_');
   return clean.length > 150 ? clean.substring(clean.length - 150) : clean;
+}
+
+/**
+ * Extracts human-readable filename, stripping raw UUID prefixes or hashes.
+ * Ensures viewer UI never displays internal UUIDs like "78db70dd-0ea2-45da-9368-2b246764f8c7".
+ */
+export function getCleanFileName(attachment: Partial<Attachment>): string {
+  if (!attachment) return 'Attachment';
+
+  const candidate =
+    attachment.originalFileName ||
+    attachment.filename ||
+    (attachment as any).original_file_name ||
+    (attachment as any).file_name ||
+    'Attachment';
+
+  // If candidate is a pure UUID string (36 chars like 78db70dd-0ea2-45da-9368-2b246764f8c7)
+  const isPureUuid = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(candidate.trim());
+  if (isPureUuid) {
+    const ext = attachment.fileExtension ? `.${attachment.fileExtension}` : '';
+    return `Attachment${ext}`;
+  }
+
+  // Strip leading UUID prefix if format is uuid-filename.ext
+  const uuidPrefixPattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}-/;
+  if (uuidPrefixPattern.test(candidate)) {
+    return candidate.replace(uuidPrefixPattern, '');
+  }
+
+  return candidate;
 }
