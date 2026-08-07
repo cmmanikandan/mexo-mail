@@ -63,10 +63,10 @@ export const uploadFileToCloudinary = async (
   const apiKey = getApiKey();
 
   const isImage = file.type.startsWith('image/');
-  const resourceType = isImage ? 'image' : 'raw';
+  const initialType = isImage ? 'image' : 'auto';
 
-  const primaryEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${resourceType}/upload`;
   const autoEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/auto/upload`;
+  const typeEndpoint = `https://api.cloudinary.com/v1_1/${cloudName}/${initialType}/upload`;
 
   const buildFormData = () => {
     const fd = new FormData();
@@ -94,33 +94,38 @@ export const uploadFileToCloudinary = async (
         if (xhr.status >= 200 && xhr.status < 300) {
           try {
             const data = JSON.parse(xhr.responseText);
+
+            // Requirement 6: Validate returned parameters
+            if (!data || !data.secure_url || !data.public_id || !data.resource_type) {
+              return reject(new Error("Couldn't upload this attachment. Please try again."));
+            }
+
             resolve({
               secure_url: data.secure_url,
               public_id: data.public_id,
               bytes: data.bytes || file.size,
               format: data.format || file.name.split('.').pop() || '',
-              resource_type: data.resource_type || resourceType,
+              resource_type: data.resource_type,
               original_filename: data.original_filename || file.name,
             });
           } catch {
-            reject(new Error('Failed to parse Cloudinary response JSON'));
+            reject(new Error("Couldn't upload this attachment. Please try again."));
           }
         } else {
           reject(new Error(`Cloudinary upload failed with status ${xhr.status}: ${xhr.responseText}`));
         }
       };
 
-      xhr.onerror = () => reject(new Error('Cloudinary upload network request failed'));
+      xhr.onerror = () => reject(new Error("Couldn't upload this attachment. Please try again."));
       xhr.send(buildFormData());
     });
   };
 
   try {
-    return await executeUpload(primaryEndpoint);
-  } catch (err) {
-    // If primary endpoint fails, fallback to auto resource type endpoint
-    console.warn('Cloudinary primary upload endpoint error. Trying auto endpoint...', err);
     return await executeUpload(autoEndpoint);
+  } catch (err) {
+    console.warn('Cloudinary auto endpoint upload error. Trying secondary endpoint...', err);
+    return await executeUpload(typeEndpoint);
   }
 };
 

@@ -137,7 +137,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         setUploadProgress(percent);
       });
 
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      const ext = res.format || file.name.split('.').pop()?.toLowerCase() || '';
       const newAtt: Attachment = {
         id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         filename: file.name,
@@ -147,7 +147,11 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
         fileExtension: ext,
         downloadUrl: res.secure_url,
         previewUrl: res.secure_url,
+        storageUrl: res.secure_url,
+        storageProvider: 'cloudinary',
         cloudinaryPublicId: res.public_id,
+        cloudinaryResourceType: res.resource_type,
+        cloudinaryFormat: res.format,
         uploadedAt: new Date().toISOString(),
       };
 
@@ -156,37 +160,14 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
       });
       addToast({ message: `Attached "${file.name}"`, type: 'success' });
     } catch (err: any) {
-      console.warn('Cloudinary upload error, using local data URL fallback:', err);
-      const ext = file.name.split('.').pop()?.toLowerCase() || '';
-
-      const readFileAsDataUrl = (f: File): Promise<string> =>
-        new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () => resolve('');
-          reader.readAsDataURL(f);
-        });
-
-      const dataUrl = await readFileAsDataUrl(file);
-
-      const fallbackAtt: Attachment = {
-        id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        filename: file.name,
-        originalFileName: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        sizeBytes: file.size,
-        fileExtension: ext,
-        downloadUrl: dataUrl || '#',
-        previewUrl: dataUrl || '#',
-        uploadedAt: new Date().toISOString(),
-      };
-      updateCompose(instance.id, {
-        attachments: [...instance.attachments, fallbackAtt],
+      console.error('Cloudinary upload error:', err);
+      addToast({
+        message: err.message || "Couldn't upload this attachment. Please try again.",
+        type: 'error',
       });
-      addToast({ message: `Attached "${file.name}"`, type: 'success' });
     } finally {
       setIsUploading(false);
-      setUploadProgress(null);
+      setUploadProgress(0);
       if (e.target) e.target.value = '';
     }
   };
@@ -201,7 +182,7 @@ export const ComposeWindow: React.FC<{ instance: ComposeInstance }> = ({ instanc
     if (e) e.preventDefault();
     if (instance.isSending || instance.isSent) return;
     if (isUploading) {
-      addToast({ message: 'Please wait for attachment upload to complete.', type: 'warning' });
+      addToast({ message: 'Please wait for attachment upload to complete before sending.', type: 'warning' });
       return;
     }
     if (instance.to.length === 0) {

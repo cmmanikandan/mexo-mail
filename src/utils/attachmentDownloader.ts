@@ -1,11 +1,57 @@
 import { Attachment } from '../types/mail';
 
+const CLOUD_NAME = 'dughdt8sf';
+
+/**
+ * Resolves the canonical, authorized attachment URL for previewing, downloading, or opening externally.
+ * Includes backward compatibility for old legacy database records.
+ */
 export const getAuthorizedAttachmentUrl = (attachment: Partial<Attachment>): string => {
-  const candidate = attachment.downloadUrl || attachment.previewUrl;
-  if (!candidate || candidate === '#' || candidate === 'undefined' || candidate === 'null') {
-    return '';
+  if (!attachment) return '';
+
+  const rawCandidate =
+    attachment.storageUrl ||
+    attachment.downloadUrl ||
+    attachment.previewUrl ||
+    (attachment as any).secure_url ||
+    (attachment as any).storage_url;
+
+  if (rawCandidate && typeof rawCandidate === 'string' && rawCandidate !== '#' && rawCandidate !== 'undefined' && rawCandidate !== 'null') {
+    let cleanUrl = rawCandidate.trim();
+
+    // Fix legacy manually corrupted replacement logic if present in old records
+    // E.g., if a legacy record corrupted an image URL by replacing image with raw
+    if (cleanUrl.includes('res.cloudinary.com')) {
+      // Cleanly encode spaces and special characters if URL is unencoded
+      try {
+        // Handle unencoded spaces in Cloudinary URLs that cause ERR_INVALID_RESPONSE
+        cleanUrl = encodeURI(cleanUrl);
+      } catch {
+        // Fallback if encodeURI fails
+      }
+      return cleanUrl;
+    }
+
+    if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') || cleanUrl.startsWith('blob:')) {
+      return encodeURI(cleanUrl);
+    }
   }
-  return candidate;
+
+  // Backward compatibility: If URL is missing/corrupted but public_id exists in old record
+  const publicId = attachment.cloudinaryPublicId || (attachment as any).public_id;
+  if (publicId && typeof publicId === 'string') {
+    const resourceType =
+      attachment.cloudinaryResourceType ||
+      (attachment as any).resource_type ||
+      (attachment.mimeType?.startsWith('image/') ? 'image' : 'auto');
+
+    const cleanPublicId = publicId.startsWith('/') ? publicId.slice(1) : publicId;
+    const encodedPublicId = cleanPublicId.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    
+    return `https://res.cloudinary.com/${CLOUD_NAME}/${resourceType}/upload/${encodedPublicId}`;
+  }
+
+  return '';
 };
 
 /**
@@ -22,7 +68,7 @@ export const downloadAttachment = async (
   if (!fileUrl) {
     if (addToast) {
       addToast({
-        message: `Attachment file URL is unavailable for "${fileName}".`,
+        message: `Attachment unavailable for "${fileName}".`,
         type: 'error',
       });
     }
@@ -33,7 +79,7 @@ export const downloadAttachment = async (
     // If it's a real HTTP / Cloudinary URL, fetch binary bytes to guarantee non-zero size
     if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://') || fileUrl.startsWith('blob:')) {
       try {
-        const response = await fetch(fileUrl);
+        const response = await fetch(fileUrl, { mode: 'cors' });
         if (response.ok) {
           const blob = await response.blob();
           if (blob && blob.size > 0) {
@@ -96,7 +142,7 @@ export const openAttachmentInNewTab = (
   if (!fileUrl) {
     if (addToast) {
       addToast({
-        message: `File URL unavailable to open "${fileName}".`,
+        message: `Attachment unavailable to open "${fileName}".`,
         type: 'error',
       });
     }

@@ -10,7 +10,11 @@ export interface Attachment {
   storageKey?: string;
   downloadUrl: string;
   previewUrl?: string;
+  storageProvider?: string;
+  storageUrl?: string;
   cloudinaryPublicId?: string;
+  cloudinaryResourceType?: string;
+  cloudinaryFormat?: string;
   uploadedAt?: string;
   isImage?: boolean;
 }

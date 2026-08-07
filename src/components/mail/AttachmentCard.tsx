@@ -51,6 +51,11 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   const [isLoadingText, setIsLoadingText] = useState(false);
   const [textError, setTextError] = useState<string | null>(null);
 
+  // PDF rendering state
+  const [isPdfLoading, setIsPdfLoading] = useState(true);
+  const [isPdfError, setIsPdfError] = useState(false);
+  const [pdfRetryKey, setPdfRetryKey] = useState(0);
+
   const category = getFileCategory(attachment);
   const ext = getFileExtension(attachment);
   const typeLabel = getFileTypeLabel(attachment);
@@ -72,6 +77,32 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
   const handleRotate = () => setRotation((prev) => (prev + 90) % 360);
 
   const fileUrl = getAuthorizedAttachmentUrl(attachment);
+
+  // PDF Preview loader watchdog & reset
+  useEffect(() => {
+    if (isPreviewOpen && category === 'pdf') {
+      setIsPdfLoading(true);
+      setIsPdfError(false);
+
+      if (!fileUrl || fileUrl === '#') {
+        setIsPdfLoading(false);
+        setIsPdfError(true);
+        return;
+      }
+
+      // Timeout watchdog: if iframe doesn't fire onLoad within 8 seconds
+      const timer = setTimeout(() => {
+        setIsPdfLoading((loading) => {
+          if (loading) {
+            console.warn('[PDF Preview] Load timeout reached for:', fileName);
+          }
+          return false;
+        });
+      }, 8000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [isPreviewOpen, category, fileUrl, pdfRetryKey, fileName]);
 
   // Fetch text content when opening text/csv preview
   useEffect(() => {
@@ -125,7 +156,10 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
     <>
       {/* ─── Attachment Card ────────────────────────────────────────────────── */}
       <div className="group relative flex flex-col p-3 rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900/90 hover:border-mexo-400 dark:hover:border-mexo-600 hover:shadow-mexo-sm transition-all w-full max-w-xs select-none">
-        <div className="flex items-start space-x-3 min-w-0">
+        <div
+          onClick={() => setIsPreviewOpen(true)}
+          className="flex items-start space-x-3 min-w-0 cursor-pointer"
+        >
           {/* Thumbnail for Images, Category Icon for Files */}
           {category === 'image' && fileUrl && fileUrl !== '#' ? (
             <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-slate-800 overflow-hidden flex-shrink-0 border border-slate-200 dark:border-slate-700">
@@ -295,7 +329,7 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
             </div>
 
             {/* Viewer Workspace Content */}
-            <div className="flex-1 bg-slate-950 overflow-hidden relative flex items-center justify-center p-2 md:p-6">
+            <div className="flex-1 bg-slate-950 overflow-hidden relative flex items-center justify-center p-2 md:p-6 pb-[calc(var(--bottom-nav-height,64px)+env(safe-area-inset-bottom,0px)+16px)] md:pb-6">
               
               {/* IMAGE VIEWER */}
               {category === 'image' && (
@@ -321,38 +355,65 @@ export const AttachmentCard: React.FC<AttachmentCardProps> = ({ attachment }) =>
 
               {/* PDF VIEWER */}
               {category === 'pdf' && (
-                <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 flex flex-col">
-                  {fileUrl && fileUrl !== '#' ? (
-                    <iframe
-                      src={fileUrl}
-                      title={fileName}
-                      className="w-full h-full border-none rounded-2xl"
-                    />
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
-                      <FileText className="w-16 h-16 text-rose-500" />
+                <div className="w-full h-full rounded-2xl overflow-hidden bg-slate-900 flex flex-col relative">
+                  {/* Loading State Skeleton */}
+                  {isPdfLoading && !isPdfError && (
+                    <div className="absolute inset-0 z-10 bg-slate-900 flex flex-col items-center justify-center space-y-3 p-6 text-slate-300">
+                      <Loader2 className="w-10 h-10 animate-spin text-rose-500" />
+                      <p className="text-sm font-bold text-white">Loading document...</p>
+                      <p className="text-xs text-slate-400 font-mono">{fileName}</p>
+                    </div>
+                  )}
+
+                  {/* Error State (Requirement 8) */}
+                  {isPdfError ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 text-center space-y-4 bg-slate-900">
+                      <AlertCircle className="w-14 h-14 text-rose-500 mx-auto" />
                       <div>
-                        <h4 className="text-base font-bold text-white">{fileName}</h4>
-                        <p className="text-xs text-slate-400 mt-1">PDF Document • {formatFileSize(attachment.sizeBytes)}</p>
+                        <h4 className="text-lg font-extrabold text-white">Unable to preview this PDF</h4>
+                        <p className="text-xs text-slate-400 mt-1">{fileName} • {formatFileSize(attachment.sizeBytes)}</p>
                       </div>
-                      <div className="flex items-center space-x-3 pt-2">
+                      <div className="flex items-center justify-center space-x-2.5 pt-2 flex-wrap gap-y-2">
                         <button
                           type="button"
-                          onClick={() => openAttachmentInNewTab(attachment, addToast)}
-                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center"
+                          onClick={() => {
+                            console.log('[PDF] Retrying PDF preview for:', fileName);
+                            setPdfRetryKey((k) => k + 1);
+                          }}
+                          className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center shadow-sm cursor-pointer"
                         >
-                          <ExternalLink className="w-4 h-4 mr-1.5" /> Open in new tab
+                          <RefreshCw className="w-4 h-4 mr-1.5" /> Try again
                         </button>
                         <button
                           type="button"
                           onClick={() => downloadAttachment(attachment, addToast)}
-                          className="px-4 py-2 bg-mexo-600 hover:bg-mexo-700 text-white text-xs font-bold rounded-xl flex items-center shadow-md"
+                          className="px-4 py-2.5 bg-[#0878e8] hover:bg-[#0668cc] text-white text-xs font-bold rounded-xl flex items-center shadow-md cursor-pointer"
                         >
-                          <Download className="w-4 h-4 mr-1.5" /> Download PDF
+                          <Download className="w-4 h-4 mr-1.5" /> Download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openAttachmentInNewTab(attachment, addToast)}
+                          className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl flex items-center cursor-pointer"
+                        >
+                          <ExternalLink className="w-4 h-4 mr-1.5" /> Open externally
                         </button>
                       </div>
                     </div>
-                  )}
+                  ) : fileUrl && fileUrl !== '#' ? (
+                    <iframe
+                      key={`pdf-frame-${pdfRetryKey}`}
+                      src={fileUrl}
+                      title={fileName}
+                      onLoad={() => setIsPdfLoading(false)}
+                      onError={(err) => {
+                        console.error('[PDF] Frame load error:', err);
+                        setIsPdfLoading(false);
+                        setIsPdfError(true);
+                      }}
+                      className="w-full h-full border-none rounded-2xl bg-white"
+                    />
+                  ) : null}
                 </div>
               )}
 
