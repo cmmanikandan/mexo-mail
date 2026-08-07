@@ -1,12 +1,13 @@
 import { Attachment } from '../types/mail';
-import { uploadFileToCloudinary, CloudinaryUploadResult } from './cloudinaryService';
+import { supabase } from './supabaseClient';
+import { useAuthStore } from '../store/authStore';
 import {
+  ATTACHMENT_CONFIG,
   validateAttachmentFile,
   getResolvedMimeType,
+  sanitizeFilename,
   getCleanFileName,
 } from '../config/attachmentConfig';
-
-const CLOUD_NAME = 'dughdt8sf';
 
 export interface FetchedBlobResult {
   blob: Blob;
@@ -15,50 +16,83 @@ export interface FetchedBlobResult {
 }
 
 export interface UploadAttachmentOptions {
-  senderUserId?: string;
-  messageId?: string;
+  senderUserId: string;
+  messageId: string;
 }
 
 class AttachmentService {
   /**
-   * Uploads a file attachment (PDF, PNG, JPG, DOCX, XLSX, PPTX, TXT, ZIP, etc.)
-   * directly to Cloudinary storage via REST API.
+   * Uploads a document/file attachment directly to private Supabase Storage bucket `mexo-mail-attachments`.
+   * Path format: {sender_user_id}/{message_id}/{attachment_uuid}-{safe_filename}
    */
   async uploadAttachment(
     file: File,
-    options?: UploadAttachmentOptions,
+    options: UploadAttachmentOptions,
     onProgress?: (percent: number) => void
   ): Promise<Attachment> {
+    const { senderUserId, messageId } = options;
+
     const validation = validateAttachmentFile(file);
     if (!validation.valid) {
       throw new Error(validation.error || 'File validation failed.');
     }
 
-    const res: CloudinaryUploadResult = await uploadFileToCloudinary(file, onProgress);
-
-    if (!res || !res.secure_url) {
-      throw new Error("Couldn't upload attachment to Cloudinary.");
-    }
-
-    const ext = res.format || file.name.split('.').pop()?.toLowerCase() || '';
+    const safeSenderId = senderUserId || 'anonymous-user';
+    const safeMsgId = messageId || 'draft-msg';
+    const randomUuid = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `att-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    const safeName = sanitizeFilename(file.name);
+    const storagePath = `${safeSenderId}/${safeMsgId}/${randomUuid}-${safeName}`;
     const contentType = getResolvedMimeType(file);
 
+    if (onProgress) onProgress(20);
+
+    const bucketName = ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME; // mexo-mail-attachments
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucketName)
+      .upload(storagePath, file, {
+        contentType,
+        upsert: false,
+      });
+
+    if (onProgress) onProgress(85);
+
+    if (uploadError) {
+      console.warn('[AttachmentService Primary Upload Warning, checking fallback bucket]', uploadError);
+      // Try fallback bucket if primary bucket fails
+      const { error: fallbackError } = await supabase.storage
+        .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+        .upload(storagePath, file, {
+          contentType,
+          upsert: false,
+        });
+
+      if (fallbackError) {
+        console.error('[AttachmentService Upload Error]', fallbackError);
+        throw new Error(fallbackError.message || uploadError.message || `Failed to upload "${file.name}" to storage.`);
+      }
+    }
+
+    if (onProgress) onProgress(100);
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
     const newAttachment: Attachment = {
-      id: `att-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: randomUuid,
+      messageId: safeMsgId,
       filename: file.name,
       originalFileName: file.name,
       mimeType: contentType,
-      sizeBytes: res.bytes || file.size,
+      sizeBytes: file.size,
       fileExtension: ext,
-      storageProvider: 'cloudinary',
-      downloadUrl: res.secure_url,
-      previewUrl: res.secure_url,
-      storageUrl: res.secure_url,
-      cloudinaryPublicId: res.public_id,
-      cloudinaryResourceType: res.resource_type,
-      cloudinaryFormat: res.format,
+      storageProvider: 'supabase',
+      bucketName,
+      storageBucket: bucketName,
+      storagePath,
       uploadedAt: new Date().toISOString(),
-      uploadedBy: options?.senderUserId || 'user',
+      uploadedBy: safeSenderId,
       isImage: contentType.startsWith('image/'),
     };
 
@@ -66,76 +100,139 @@ class AttachmentService {
   }
 
   /**
-   * Resolves the canonical Cloudinary access URL for an attachment record.
+   * Generates a fresh temporary authorized signed URL for a private attachment.
+   * Signed URLs expire in 300 seconds (5 minutes). Re-signs automatically if expired.
    */
-  getAttachmentAccessUrl(attachment: Partial<Attachment>): string {
-    if (!attachment) return '';
+  async getAttachmentAccessUrl(
+    attachment: Partial<Attachment>,
+    expiresInSeconds: number = ATTACHMENT_CONFIG.SIGNED_URL_EXPIRES_IN_SECONDS
+  ): Promise<string> {
+    if (!attachment) {
+      throw new Error('Attachment metadata is missing.');
+    }
 
-    const rawCandidate =
+    // 1. Session verification & token refresh if needed
+    let activeSession = null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      activeSession = data?.session;
+
+      if (!activeSession) {
+        const { data: refreshData } = await supabase.auth.refreshSession();
+        activeSession = refreshData?.session;
+      }
+    } catch (e) {
+      console.warn('[AttachmentService Auth Session Check Error]', e);
+    }
+
+    // Only throw session expired error if user is completely logged out of MEXO Mail
+    const isMexoAuthenticated = useAuthStore.getState().isAuthenticated;
+    if (!activeSession && !isMexoAuthenticated) {
+      throw new Error('Your MEXO session has expired. Sign in again.');
+    }
+
+    // 2. Resolve storage path & bucket
+    const path = attachment.storagePath || (attachment as any).storage_path;
+    const bucket =
+      attachment.storageBucket ||
+      attachment.bucketName ||
+      (attachment as any).storage_bucket ||
+      ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+
+    if (path) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(path, expiresInSeconds);
+
+      if (!error && data?.signedUrl) {
+        return data.signedUrl;
+      }
+
+      // Try fallback bucket if primary returned an issue
+      if (error && bucket !== ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME) {
+        const { data: fallbackData, error: fallbackErr } = await supabase.storage
+          .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+          .createSignedUrl(path, expiresInSeconds);
+
+        if (!fallbackErr && fallbackData?.signedUrl) {
+          return fallbackData.signedUrl;
+        }
+      }
+
+      if (error?.message?.includes('403') || error?.message?.includes('Permission')) {
+        throw new Error("You don't have permission to access this attachment.");
+      }
+
+      if (error?.message?.includes('404') || error?.message?.includes('Object not found')) {
+        throw new Error('This attachment is no longer available.');
+      }
+
+      console.warn('[AttachmentService SignedUrl Error]', error);
+    }
+
+    // 3. Fallback for Legacy Cloudinary attachments
+    const legacyCandidate =
       attachment.storageUrl ||
       attachment.downloadUrl ||
       attachment.previewUrl ||
-      (attachment as any).secure_url ||
-      (attachment as any).storage_url;
+      (attachment as any).secure_url;
 
-    if (
-      rawCandidate &&
-      typeof rawCandidate === 'string' &&
-      rawCandidate !== '#' &&
-      rawCandidate !== 'undefined' &&
-      rawCandidate !== 'null'
-    ) {
-      let cleanUrl = rawCandidate.trim();
-      if (cleanUrl.includes('res.cloudinary.com')) {
-        try {
-          return encodeURI(cleanUrl);
-        } catch {
-          return cleanUrl;
-        }
-      }
-      if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') || cleanUrl.startsWith('blob:')) {
-        return encodeURI(cleanUrl);
-      }
+    if (legacyCandidate && typeof legacyCandidate === 'string' && legacyCandidate.startsWith('http')) {
+      return encodeURI(legacyCandidate.trim());
     }
 
-    // Reconstruct canonical URL if publicId exists
-    const publicId = attachment.cloudinaryPublicId || (attachment as any).public_id;
-    if (publicId && typeof publicId === 'string') {
-      const resourceType =
-        attachment.cloudinaryResourceType ||
-        (attachment as any).resource_type ||
-        (attachment.mimeType?.startsWith('image/') ? 'image' : 'raw');
-
-      const cleanPublicId = publicId.startsWith('/') ? publicId.slice(1) : publicId;
-      const encodedPublicId = cleanPublicId.split('/').map((segment) => encodeURIComponent(segment)).join('/');
-
-      return `https://res.cloudinary.com/${CLOUD_NAME}/${resourceType}/upload/${encodedPublicId}`;
-    }
-
-    return '';
+    throw new Error('This attachment is no longer available.');
   }
 
   /**
-   * Fetches binary bytes of a Cloudinary attachment and returns a Blob with a browser Object URL.
+   * Fetches binary bytes of an attachment using authenticated storage / fresh signed URL.
+   * Uses `cache: 'no-store'` preventing Service Worker SW caching of temporary signed URLs.
    */
   async fetchAttachmentBlob(attachment: Partial<Attachment>): Promise<FetchedBlobResult> {
-    const fileUrl = this.getAttachmentAccessUrl(attachment);
-    const fileName = getCleanFileName(attachment);
+    const bucket =
+      attachment.storageBucket ||
+      attachment.bucketName ||
+      ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+    const path = attachment.storagePath || (attachment as any).storage_path;
 
-    if (!fileUrl) {
-      throw new Error(`Attachment URL unavailable for "${fileName}"`);
+    // 1. Direct Supabase Storage download if storagePath is available
+    if (path) {
+      const { data: blob, error } = await supabase.storage
+        .from(bucket)
+        .download(path);
+
+      if (!error && blob && blob.size > 0) {
+        const objectUrl = URL.createObjectURL(blob);
+        return { blob, objectUrl, contentType: blob.type || attachment.mimeType };
+      }
+
+      if (bucket !== ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME) {
+        const { data: fallbackBlob, error: fallbackErr } = await supabase.storage
+          .from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME)
+          .download(path);
+
+        if (!fallbackErr && fallbackBlob && fallbackBlob.size > 0) {
+          const objectUrl = URL.createObjectURL(fallbackBlob);
+          return { blob: fallbackBlob, objectUrl, contentType: fallbackBlob.type || attachment.mimeType };
+        }
+      }
     }
 
-    const response = await fetch(fileUrl, { mode: 'cors' });
+    // 2. Fallback fetch via temporary signed URL
+    const signedUrl = await this.getAttachmentAccessUrl(attachment);
+    const response = await fetch(signedUrl, { mode: 'cors', cache: 'no-store' });
 
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(`This Cloudinary attachment is restricted (${response.status}).`);
+    if (response.status === 401) {
+      throw new Error('Your MEXO session could not authorize this attachment.');
+    }
+    if (response.status === 403) {
+      throw new Error("You don't have permission to access this attachment.");
     }
     if (response.status === 404) {
-      throw new Error(`This attachment is no longer available.`);
+      throw new Error('This attachment is no longer available.');
     }
     if (!response.ok) {
-      throw new Error(`Attachment request failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Unable to load attachment. Check your connection and try again.`);
     }
 
     const blob = await response.blob();
@@ -154,14 +251,14 @@ class AttachmentService {
     attachment: Partial<Attachment>,
     addToast?: (toast: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => void
   ): Promise<void> {
-    const fileName = getCleanFileName(attachment);
+    const cleanName = getCleanFileName(attachment);
 
     try {
       const { objectUrl } = await this.fetchAttachmentBlob(attachment);
 
       const link = document.createElement('a');
       link.href = objectUrl;
-      link.download = fileName;
+      link.download = cleanName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -171,31 +268,36 @@ class AttachmentService {
       }, 3000);
 
       if (addToast) {
-        addToast({ message: `Downloaded "${fileName}"`, type: 'success' });
+        addToast({ message: `Downloaded "${cleanName}"`, type: 'success' });
       }
     } catch (err: any) {
-      console.error('[AttachmentService] Download failed, attempting direct link fallback:', err);
+      console.error('[AttachmentService] Download failed:', err);
 
-      const directUrl = this.getAttachmentAccessUrl(attachment);
-      if (directUrl) {
-        const link = document.createElement('a');
-        link.href = directUrl;
-        link.download = fileName;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+      // Fallback direct window trigger
+      try {
+        const directUrl = await this.getAttachmentAccessUrl(attachment);
+        if (directUrl) {
+          const link = document.createElement('a');
+          link.href = directUrl;
+          link.download = cleanName;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
 
-        if (addToast) {
-          addToast({ message: `Initiated download for "${fileName}"`, type: 'info' });
+          if (addToast) {
+            addToast({ message: `Initiated download for "${cleanName}"`, type: 'info' });
+          }
+          return;
         }
-        return;
+      } catch {
+        // Suppress nested fallback error
       }
 
       if (addToast) {
         addToast({
-          message: err.message || `Unable to download "${fileName}". Please try again.`,
+          message: err.message || `Unable to download "${cleanName}". Please try again.`,
           type: 'error',
         });
       }
@@ -203,30 +305,21 @@ class AttachmentService {
   }
 
   /**
-   * Opens Cloudinary attachment URL in a new tab.
+   * Opens attachment URL in a new tab via fresh temporary signed URL.
    */
-  openAttachmentExternally(
+  async openAttachmentExternally(
     attachment: Partial<Attachment>,
     addToast?: (toast: { message: string; type?: 'info' | 'success' | 'warning' | 'error' }) => void
-  ): void {
-    const fileName = getCleanFileName(attachment);
-    const fileUrl = this.getAttachmentAccessUrl(attachment);
-
-    if (!fileUrl) {
-      if (addToast) {
-        addToast({
-          message: `Attachment URL unavailable for "${fileName}".`,
-          type: 'error',
-        });
-      }
-      return;
-    }
+  ): Promise<void> {
+    const cleanName = getCleanFileName(attachment);
 
     try {
-      const newWindow = window.open(fileUrl, '_blank', 'noopener,noreferrer');
+      const freshSignedUrl = await this.getAttachmentAccessUrl(attachment);
+
+      const newWindow = window.open(freshSignedUrl, '_blank', 'noopener,noreferrer');
       if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
         const link = document.createElement('a');
-        link.href = fileUrl;
+        link.href = freshSignedUrl;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
         document.body.appendChild(link);
@@ -237,7 +330,7 @@ class AttachmentService {
       console.error('[AttachmentService] Open externally failed:', err);
       if (addToast) {
         addToast({
-          message: `Unable to open "${fileName}" in new tab.`,
+          message: err.message || `Unable to open "${cleanName}" in new tab.`,
           type: 'error',
         });
       }
@@ -245,10 +338,25 @@ class AttachmentService {
   }
 
   /**
-   * Delete attachment placeholder (Cloudinary REST API deletion requires signed API secret on server)
+   * Deletes attachment file object from Supabase Storage bucket.
    */
-  async deleteAttachment(publicId?: string): Promise<boolean> {
-    return true;
+  async deleteAttachment(storagePath: string, bucketName?: string): Promise<boolean> {
+    if (!storagePath) return false;
+    const bucket = bucketName || ATTACHMENT_CONFIG.PRIMARY_BUCKET_NAME;
+
+    try {
+      const { error } = await supabase.storage
+        .from(bucket)
+        .remove([storagePath]);
+
+      if (error) {
+        await supabase.storage.from(ATTACHMENT_CONFIG.FALLBACK_BUCKET_NAME).remove([storagePath]);
+      }
+      return true;
+    } catch (err) {
+      console.warn('Error deleting storage object:', err);
+      return false;
+    }
   }
 }
 

@@ -22,18 +22,18 @@ import { useAuthStore } from './store/authStore';
 import { SplashScreen } from './components/common/SplashScreen';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuthStore();
-  if (isLoading && !isAuthenticated) return null;
-  if (!isAuthenticated) {
+  const { isAuthenticated, authStatus, isLoading } = useAuthStore();
+  if (authStatus === 'loading' || (isLoading && !isAuthenticated)) return null;
+  if (!isAuthenticated || authStatus === 'unauthenticated') {
     return <Navigate to="/signin" replace />;
   }
   return <>{children}</>;
 };
 
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser, isAuthenticated, isLoading } = useAuthStore();
-  if (isLoading && !isAuthenticated) return null;
-  if (!isAuthenticated || currentUser?.role !== 'system_admin') {
+  const { currentUser, isAuthenticated, authStatus, isLoading } = useAuthStore();
+  if (authStatus === 'loading' || (isLoading && !isAuthenticated)) return null;
+  if (!isAuthenticated || authStatus === 'unauthenticated' || currentUser?.role !== 'system_admin') {
     return <Navigate to="/mail/inbox" replace />;
   }
   return <>{children}</>;
